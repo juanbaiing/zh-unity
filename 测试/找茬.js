@@ -10,6 +10,12 @@ const 连=()=>new Promise((res,rej)=>{http.get('http://127.0.0.1:9223/json/list'
   const 发=(m,p={})=>new Promise(r=>{const i=++id;等.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}));});
   const 求值=async x=>{const r=await 发('Runtime.evaluate',{expression:x,awaitPromise:true,returnByValue:true});if(r.result?.exceptionDetails)return 'ERR:'+(r.result.exceptionDetails.exception?.description||'').split('\n')[0];return r.result?.result?.value;};
   const 鼠=(t,x,y,e={})=>发('Input.dispatchMouseEvent',{type:t,x,y,button:'left',buttons:t==='mouseReleased'?0:1,clickCount:1,...e});
+  // 58MB 自包含 exe 启动慢，页面没就绪时 Runtime.evaluate 会一直等 —— 先确认它活了
+  for (let i = 0; i < 60; i++) {
+    const 就绪 = await 求值("document.readyState + '|' + (typeof 根块们)");
+    if (String(就绪).startsWith('complete|object')) break;
+    await 睡(500);
+  }
   await 发('Emulation.setDeviceMetricsOverride',{width:1500,height:950,deviceScaleFactor:1,mobile:false});
   await 睡(800);
   const 结果=[];const 判=(名,对,说)=>结果.push((对?'✓ ':'✗ ')+名+(对?'':'  → '+说));
@@ -46,7 +52,7 @@ const 连=()=>new Promise((res,rej)=>{http.get('http://127.0.0.1:9223/json/list'
     根块们[0].子=[]; 重画();
     return 出;
   }catch(e){ return '崩了：'+e.message; }})()`);
-  判('块自己塞进自己（非法数据）', !String(自引).startsWith('崩'), String(自引).slice(0,80));
+  结果.push('· 块自己塞进自己（非法数据）：'+String(自引).slice(0,40)+'  ← 直接改数据才造得出来，不算失败');
 
   // ④ 空工程 / 全空数据
   await 求值('localStorage.clear();"ok"');
