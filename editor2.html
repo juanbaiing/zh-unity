@@ -76,7 +76,7 @@
   .en{font-size:10px;color:#4a5568;font-style:italic;user-select:none;
     flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
-  .stage{flex:1;overflow:auto;min-width:0}
+  .stage{flex:5 1 0;overflow:auto;min-width:200px}
   #world{position:relative;width:2400px;height:1600px;
     background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:#4a5568;font-size:12px}
@@ -180,22 +180,28 @@
   .branch{border-top:1px dashed #2b3341}
   .branch .head{cursor:default}
 
-  .code{width:38%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .code{flex:3 1 0;min-width:200px;border-left:1px solid var(--line);display:flex;flex-direction:column}
   .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);
     border-bottom:1px solid var(--line);background:var(--panel)}
-  /* 中间层：块和 C# 之间的那一层。默认折叠，不挡主角；
-     但标题一直在，让人知道有这东西可以点开看 */
-  .mid{flex:none;border-bottom:1px solid var(--line);background:#131820}
-  .mid > summary{padding:5px 10px;font-size:11px;color:#6b7688;cursor:pointer;
-    user-select:none;list-style:none}
-  .mid > summary::-webkit-details-marker{display:none}
-  .mid > summary::before{content:'▸ ';color:#4a5568}
-  .mid[open] > summary::before{content:'▾ '}
-  .mid[open] > summary{color:var(--cn);border-bottom:1px dashed #232a36}
-  .mid > summary:hover{color:var(--text)}
-  .mid > pre{margin:0;padding:8px 10px;max-height:30vh;overflow:auto;
-    font-size:11.5px;line-height:1.6;white-space:pre;color:#a8b8a0;
-    background:#10151c;user-select:text}
+  /* 中间层单独一列。默认收成一条竖条（不占地方），点开才铺开，
+     这样块、中文写法、C# 能横向对着看。 */
+  .mid{flex:none;width:34px;background:#131820;border-left:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden;
+    transition:width .14s ease-out}
+  .mid.开{width:auto;flex:2 1 0;min-width:180px}
+  .midBar{writing-mode:vertical-rl;padding:12px 0;font-size:11.5px;
+    color:#6b7688;cursor:pointer;user-select:none;white-space:nowrap;
+    letter-spacing:2px;flex:none;text-align:center}
+  .midBar:hover{color:var(--cn)}
+  .mid.开 .midBar{writing-mode:horizontal-tb;padding:5px 10px;
+    border-bottom:1px solid var(--line);color:var(--cn);letter-spacing:0;
+    display:flex;justify-content:space-between}
+  .mid.开 .midBar::after{content:'▾';color:#4a5568}
+  .midBar::before{content:''}
+  .mid > pre{margin:0;padding:8px 10px;flex:1;overflow:auto;display:none;
+    font-size:11.5px;line-height:1.6;white-space:pre;
+    color:#a8b8a0;background:#10151c;user-select:text}
+  .mid.开 > pre{display:block}
 
   .codelines{margin:0;padding:6px 0;overflow:auto;flex:1;
     font-size:11.5px;line-height:1.55;white-space:pre;
@@ -256,11 +262,12 @@
     <div id="world"><div id="hintEmpty">从左边点一个块开始</div></div>
   </section>
 
+  <section class="mid" id="midLayer">
+    <div class="midBar" id="midToggle" title="点开：看这一堆块对应的中文写法">中间层</div>
+    <pre id="midOut"></pre>
+  </section>
+
   <section class="code">
-    <details class="mid" id="midLayer">
-      <summary>中间层 · 这一堆块对应的写法（点开对照）</summary>
-      <pre id="midOut"></pre>
-    </details>
     <div class="title">生成的 C#<span id="errCount" class="errcount"></span></div>
     <div class="codelines" id="out"></div>
     <div class="warn hidden" id="warn"></div>
@@ -523,6 +530,10 @@ document.addEventListener('scroll', () => {
   if (简介卡 && 简介锚) 显示简介(简介锚.dataset.t || '', 简介锚);
 }, true);
 window.addEventListener('resize', 关简介);
+
+document.getElementById('midToggle').onclick = () => {
+  document.getElementById('midLayer').classList.toggle('开');
+};
 
 // ---------------- 说明浮层 ----------------
 // 点块上的 ? 弹出这块的说明。做成浮层而不是往块里塞——

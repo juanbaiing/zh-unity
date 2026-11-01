@@ -228,8 +228,10 @@ namespace ZhEditorShell
                 Text = "中文套式编辑器",
                 Width = 1400,
                 Height = 900,
-                MinimumSize = new System.Drawing.Size(800, 600),
+                MinimumSize = new System.Drawing.Size(900, 620),
                 StartPosition = FormStartPosition.CenterScreen,
+                // 四列并排（托盘 / 画布 / 中间层 / C#），窗口不开大点会挤成一团
+                WindowState = FormWindowState.Maximized,
             };
 
             var 网页 = new WebView2 { Dock = DockStyle.Fill };
