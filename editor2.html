@@ -889,22 +889,6 @@ function 开始拖(b, el, 起始) {
 // 把一个块塞进宿主。
 // ⚠ 不能一律 push 到 .子 —— 盒可能是「否则若/否则」那一段的内容区，
 //   那样块会跑到主内容区去，看起来就是「从属关系乱了」。
-// 清重叠改的是数据里的 x/y，DOM 的位置不会自己变 —— 不补这一下，
-// 界面上块还叠在老地方，要等下次重画才「突然跳过去」。
-function 同步位置(列表) {
-  (function 走(ls) {
-    for (const b of ls || []) {
-      const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
-      if (el) {
-        el.style.left = (b.x || 0) + 'px';
-        el.style.top = (b.y || 0) + 'px';
-      }
-      走(b.子);
-      for (const 段 of b.分支 || []) 走(段.子);
-    }
-  })(列表);
-}
-
 function 收进(盒, 宿主块, b) {
   const 段el = 盒 && 盒.parentElement;
   if (段el && 段el.classList && 段el.classList.contains('branch')) {
@@ -950,8 +934,13 @@ function 清重叠(列表) {
         if (竖撞 && 横撞) { 顶 = a底 + 8; 再 = true; }
       }
     }
-    if (顶 !== (b.y || 0)) 动过 = true;
-    b.y = 顶;
+    if (顶 !== (b.y || 0)) {
+      动过 = true;
+      b.y = 顶;
+      // 顺手把界面上那个 DOM 也挪了 —— 只改被推开的这几个，不遍历全树
+      const el = document.querySelector(`.blk[data-id="${b.id}"]`);
+      if (el) el.style.top = 顶 + 'px';
+    }
     已放.push(b);
   }
   return 动过;
@@ -1135,6 +1124,22 @@ function 存盘() {
   } catch (e) { /* 存不了就算了，不能因此让编辑器挂掉 */ }
 }
 
+// 数据里万一同一个块既是爹又是孙子，布局会无限递归把主线程打死。
+// 用「当前路径」判环（回溯时删掉），只切掉环上那一刀。
+// ⚠ 只在读档时跑一次 —— 挂在每次重画上会把拖动搞卡死（重画是热路径）。
+function 修环(列表, 路径) {
+  const 出 = [];
+  for (const b of 列表 || []) {
+    if (!b || 路径.has(b)) continue;
+    路径.add(b);
+    b.子 = 修环(b.子, 路径);
+    for (const 段 of b.分支 || []) 段.子 = 修环(段.子, 路径);
+    路径.delete(b);
+    出.push(b);
+  }
+  return 出;
+}
+
 function 读盘() {
   try {
     const t = localStorage.getItem(存档键);
@@ -1144,6 +1149,10 @@ function 读盘() {
     工程表 = 数据;
     const 名字 = Object.keys(工程表);
     if (!名字.length) return false;
+    for (const 名 of 名字) {
+      const 项 = 工程表[名];
+      if (项 && Array.isArray(项.块们)) 项.块们 = 修环(项.块们, new Set());
+    }
     当前工程 = 名字[0];
     根块们 = 工程表[当前工程].块们 || [];
     return true;
@@ -1155,7 +1164,8 @@ function 切到工程(名) {
   if (!工程表[名]) return;
   存盘();                       // 先把当前这个存一下
   当前工程 = 名;
-  根块们 = 工程表[名].块们 || [];
+  根块们 = 修环(工程表[名].块们 || [], new Set());
+  工程表[名].块们 = 根块们;
   历史 = []; 历史位 = -1;      // 历史不跨工程，不然撤销会串到别的文件
   关说明(); 关选项();
   重画();
@@ -1261,7 +1271,6 @@ function 重画(跳过重叠整理) {
   // ⚠ 但拖放中途那几次重画不能做：新块刚建出来还在临时位置，
   //   会被当成挡路的，把旁边的块全推走 —— 这就是「拖着拖着别人跑了」。
   if (!跳过重叠整理 && 清全部重叠()) {
-    同步位置(根块们);      // 数据里的坐标变了，DOM 得跟着动，不然界面上还叠着
     布局(根块们);
   }
   // 拖放中途的临时重画也不进历史 —— 否则拖一次会记好几条，撤销一次退不回去
