@@ -1,0 +1,26 @@
+# 构建产物和大依赖，不进仓库
+.nuget/
+.dotnet/
+发布/
+发布-瘦身/
+发布-自包含/
+编辑器壳/bin/
+编辑器壳/obj/
+unitycheck/bin/
+unitycheck/obj/
+
+# 我调试时生成的一堆临时页面和脚本
+_dump*.html
+_probe*.html
+_mk*.js
+_check*.js
+_check_*.js
+_drive*.js
+_diag.js
+_test-*.js
+compile-test*.js
+_*.html
+
+# 系统
+Thumbs.db
+.DS_Store

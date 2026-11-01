@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中文套式 · 自由画布</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --line:#252b36; --text:#d7dce4; --dim:#7b8494;
+    --cn:#7ee787; --cs:#79c0ff; --bad:#ff6b6b;
+    --kcontain:#a855f7; --kstmt:#22c55e; --kdata:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  /* 滚动条跟着主题走，不然深色界面里会横一条刺眼的白条 */
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:#12161d}
+  *::-webkit-scrollbar-thumb{background:#2b3341;border-radius:5px;
+    border:2px solid #12161d}
+  *::-webkit-scrollbar-thumb:hover{background:#3d4759}
+  *::-webkit-scrollbar-corner{background:#12161d}
+  html,body{height:100%;margin:0;scrollbar-color:#2b3341 #12161d;scrollbar-width:thin}
+  body{background:var(--bg);color:var(--text);font-family:"Cascadia Code","Consolas",monospace;
+    font-size:12.5px;display:flex;flex-direction:column;overflow:hidden}
+  header{padding:7px 12px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:10px;flex:none}
+  header h1{font-size:13px;margin:0}
+  .hint{color:var(--dim);font-size:11.5px}
+  .spacer{flex:1}
+  button{background:#1f2632;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:4px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  button:hover{background:#2a3342}
+  button.on{background:#2a3547;color:var(--cn);border-color:var(--cn)}
+
+  main{flex:1;display:flex;min-height:0}
+  .palette{width:170px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    padding:8px 7px;overflow:auto;position:relative;min-width:110px;max-width:460px}
+  /* 右边缘的拖动条：鼠标变成左右箭头，拖它改宽度 */
+  .resizer{position:absolute;top:0;right:-3px;width:6px;height:100%;
+    cursor:col-resize;z-index:10}
+  .resizer:hover,.resizer.拖中{background:var(--cn)}
+  .palette h2{font-size:10.5px;color:var(--dim);margin:0 0 6px}
+
+  /* 分组：点标题收起/展开 */
+  .grp-sec{margin-bottom:6px}
+  .palette h2.grp{font-size:10px;color:#5a6478;margin:8px 0 4px;padding-bottom:3px;
+    border-bottom:1px solid #232a36;letter-spacing:1px;cursor:pointer;
+    display:flex;align-items:center;gap:4px;user-select:none}
+  .palette h2.grp:hover{color:var(--cn)}
+  .grp-arrow{font-size:9px;transition:transform .12s;display:inline-block}
+  .grp-sec.collapsed .grp-arrow{transform:rotate(-90deg)}
+  .grp-sec.collapsed .chips{display:none}
+
+  /* 分组横着排、组内块竖着排：侧边栏拖宽就多出几列分组 */
+  #palette{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+  .grp-sec{flex:0 0 auto;min-width:96px;max-width:100%}
+  .chips{display:flex;flex-direction:column;gap:3px}
+
+  .chip{padding:4px 8px;border-radius:5px;cursor:grab;user-select:none;
+    border:1px dashed #3a4354;background:#1a1f28;font-size:11.5px;
+    display:flex;align-items:baseline;gap:5px;white-space:nowrap}
+  .chip:hover{border-color:var(--cn);color:var(--cn)}
+  .chip .en{margin-right:0}
+
+  .stage{flex:1;position:relative;overflow:auto;min-width:0;background:
+    radial-gradient(circle, #1b212b 1px, transparent 1px) 0 0/22px 22px}
+  #world{position:relative;width:2400px;height:1600px}
+  #wires{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;
+    pointer-events:none;z-index:2}
+
+  .blk{position:absolute;z-index:3;background:#171c25;border:1px solid #2b3341;
+    border-radius:6px;padding:5px 7px;min-width:120px;cursor:move;user-select:none;
+    box-shadow:0 1px 3px #0008;border-left:3px solid var(--kstmt)}
+  /* 上下各一个连接点：按住下圆点拖到别的块，松手就连上 */
+  .port{position:absolute;left:50%;transform:translateX(-50%);
+    width:9px;height:9px;border-radius:50%;
+    background:#1f2632;border:1px solid #3a4354;z-index:5;
+    transition:background .12s,border-color .12s,box-shadow .12s}
+  .port.in{top:-5px}
+  .port.out{bottom:-5px;cursor:crosshair}
+  .port.out:hover{background:var(--cn);border-color:var(--cn);box-shadow:0 0 8px #7ee78799}
+  .blk.from .port.out{background:var(--cn);border-color:var(--cn);box-shadow:0 0 6px #7ee78788}
+  .blk.to .port.in{background:#4b9fff;border-color:#4b9fff;box-shadow:0 0 6px #4b9fff88}
+  /* 容器永远压在叶块下面：否则先建叶块、后建容器时，容器会把叶块盖住 */
+  .blk.contain{z-index:1}
+  .blk[data-t="类"],.blk[data-t="方法"],.blk[data-t="设若"],
+  .blk[data-t="只要"],.blk[data-t="重复"]{border-left-color:var(--kcontain);cursor:default}
+  .blk[data-t="字段"]{border-left-color:var(--kdata)}
+  .blk.lonely{border-color:var(--bad);border-left-color:var(--bad);
+    box-shadow:0 0 0 1px var(--bad), 0 0 10px #ff6b6b55}
+  .blk.lonely .kind::after{content:" 孤岛";color:var(--bad);font-weight:700}
+
+  .kind{font-size:10px;color:var(--dim);background:#1f2632;padding:0 5px;border-radius:3px;margin-right:2px}
+  /* 块类型旁边的英文对照：淡到不抢眼，但一直看得见 */
+  .en{font-size:10px;color:#4a5568;margin-right:4px;font-style:italic;user-select:none}
+  /* input 默认行高按西文算，中文顶部笔画会被裁掉一截。
+     显式给 height + line-height 才能让汉字完整显示。 */
+  .fld{color:var(--cn);border:1px solid transparent;border-radius:3px;
+    padding:0 5px;outline:none;background:#12161d;font-size:11.5px;font-family:inherit;
+    height:20px;line-height:18px;box-sizing:border-box;vertical-align:middle;min-width:28px}
+  .fld:focus{border-color:var(--cn);background:#0d1117}
+  .fld::placeholder{color:#4a5568}
+  /* 有预设的输入框，右边加个小三角，提示「这里能选」 */
+  .fld.has-dd{background-image:linear-gradient(45deg,transparent 50%,#6b7688 50%),
+    linear-gradient(135deg,#6b7688 50%,transparent 50%);
+    background-position:calc(100% - 9px) 9px, calc(100% - 5px) 9px;
+    background-size:4px 4px, 4px 4px;background-repeat:no-repeat;
+    padding-right:16px}
+
+  /* 自绘下拉面板 */
+  #dd{position:fixed;z-index:999;display:none;background:#1a1f28;
+    border:1px solid #3a4354;border-radius:6px;padding:4px;
+    max-height:220px;overflow:auto;box-shadow:0 6px 20px #000b;min-width:120px}
+  .dd-item{padding:4px 9px;border-radius:4px;cursor:pointer;color:var(--text);
+    font-size:11.5px;white-space:nowrap}
+  .dd-item:hover{background:#2a3547;color:var(--cn)}
+  .del{float:right;color:#6b7688;cursor:pointer;padding:0 3px}
+  .del:hover{color:var(--bad)}
+  /* if 链的续接按钮 */
+  .branch-add{color:#6b7688;cursor:pointer;padding:0 4px;font-size:11px;user-select:none;white-space:nowrap}
+  .branch-add:hover{color:var(--cn)}
+  /* 续接的分支：去掉上圆角、藏掉上圆点，和上面那格连成一整条 */
+  .blk.chain-cont{border-top-left-radius:0;border-top-right-radius:0}
+  .blk.chain-cont > .port.in{display:none}
+
+  .contain{min-width:330px;min-height:150px;padding-bottom:8px}
+  .contain .areas{color:#4a5568;font-size:10.5px;margin-top:6px;padding-top:6px;
+    border-top:1px dashed #2b3341}
+  .blk.sel{box-shadow:0 0 0 2px var(--cn), 0 1px 3px #0008}
+
+  /* 从调色板拖出来的跟手幽灵 */
+  .blk.ghost{position:fixed !important;pointer-events:none;z-index:9999;
+    opacity:.82;box-shadow:0 8px 24px #000b;cursor:grabbing}
+
+  /* 拖动时靠近/进入的容器：高亮 + 张开，块才容易掉进去 */
+  .blk.near{border-color:var(--cn);box-shadow:0 0 0 2px var(--cn), 0 0 14px #7ee78755}
+
+  /* 连线模式下的块 */
+  body.linking .blk{cursor:crosshair}
+  body.linking .blk:hover{box-shadow:0 0 0 2px var(--cn)}
+  #linkbar{position:fixed;left:12px;bottom:12px;z-index:50;background:#1f2632;border:1px solid var(--cn);
+    border-radius:6px;padding:6px 12px;font-size:12px;color:var(--cn);display:none}
+  #linkbar.show{display:block}
+
+  .code{width:38%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);border-bottom:1px solid var(--line);background:var(--panel)}
+  .code pre{margin:0;padding:10px;overflow:auto;color:var(--cs);font-size:11.5px;line-height:1.5;flex:1;white-space:pre}
+  .warn{padding:4px 10px;background:#2a1414;color:var(--bad);font-size:11px;border-top:1px solid #442020}
+  .warn.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中文套式 · 自由画布</h1>
+  <span class="hint">拖块＝移动 ｜ 拖进大框＝归属 ｜ 按住块下圆点拖到目标＝连线</span>
+  <span class="spacer"></span>
+  <button id="copyBtn">复制 C#</button>
+  <button id="clearBtn">清空</button>
+</header>
+
+<main>
+  <aside class="palette" id="paletteBox">
+    <h2>点一下加块</h2>
+    <div id="palette"></div>
+    <div class="resizer" id="resizer" title="拖我改宽度"></div>
+  </aside>
+
+  <section class="stage" id="stage">
+    <div id="world">
+      <svg id="wires">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#4b9fff"></path>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </section>
+
+  <section class="code">
+    <div class="title">生成的 C#</div>
+    <pre id="out"></pre>
+    <div class="warn hidden" id="warn"></div>
+  </section>
+</main>
+
+<script src="translator.js"></script>
+<script src="unity-words.js"></script>
+<script src="zh2unity.js"></script>
+<script src="blocks.js"></script>
+<script src="canvas.js"></script>
+<script>
+const { 块定义, 新块, 收集选项 } = window.Blocks;
+const { 生成中文, 找孤岛 } = window.Canvas2;
+
+let seq = 0;
+const 表 = new Map();                 // id -> 块（含 x,y,父,后）
+const 世界 = document.getElementById('world');
+const 线层 = document.getElementById('wires');
+const 舞台 = document.getElementById('stage');
+
+// ---------------- 预设选项（自绘下拉，跟随深色主题）----------------
+const 选项池 = 收集选项();
+
+const 面板 = document.createElement('div');
+面板.id = 'dd';
+document.body.appendChild(面板);
+
+let 当前输入 = null;
+
+function 关下拉() { 面板.style.display = 'none'; 当前输入 = null; }
+
+function 开下拉(input, 选项, 过滤) {
+  当前输入 = input;
+  面板.innerHTML = '';
+
+  // 只有真的在打字时才按内容筛。
+  // 聚焦时若也用当前值筛，下拉里就只剩它自己一个选项。
+  const 已写 = input.value.trim();
+  const 可用 = (过滤 && 已写) ? 选项.filter(o => o.includes(已写)) : 选项;
+  if (!可用.length) { 关下拉(); return; }
+
+  可用.forEach(o => {
+    const d = document.createElement('div');
+    d.className = 'dd-item';
+    d.textContent = o;
+    d.addEventListener('mousedown', e => {
+      e.preventDefault();
+      input.value = o;
+      input.dispatchEvent(new Event('input'));
+      关下拉();
+    });
+    面板.appendChild(d);
+  });
+
+  const r = input.getBoundingClientRect();
+  面板.style.left = Math.round(r.left) + 'px';
+  面板.style.top = Math.round(r.bottom + 3) + 'px';
+  面板.style.minWidth = Math.round(r.width) + 'px';
+  面板.style.display = 'block';
+}
+
+document.addEventListener('mousedown', e => {
+  if (!面板.contains(e.target) && e.target !== 当前输入) 关下拉();
+});
+
+// 输入框跟着内容变宽。
+// 宽度算太紧会把最后一个字的右侧笔画裁掉 —— 中文按 15px、西文 8px 估，
+// 再留 26px 给左右内边距和边框。
+function 自适应宽(el) {
+  let 宽 = 0;
+  for (const ch of el.value) 宽 += ch.charCodeAt(0) > 255 ? 15 : 8;
+  宽 += 26;
+  el.style.width = Math.max(40, 宽) + 'px';
+}
+
+function 建(类型, x, y) {
+  const b = 新块(类型);
+  b.id = ++seq;
+  b.x = x; b.y = y;
+  b.父 = null; b.后 = null;
+  表.set(b.id, b);
+  return b;
+}
+
+// ---------------- 渲染 ----------------
+function 重绘() {
+  // 清掉旧块（保留 svg）
+  [...世界.querySelectorAll('.blk')].forEach(e => e.remove());
+
+  const 孤岛 = new Set(找孤岛(表).map(x => x.块.id));
+
+  for (const b of 表.values()) 世界.appendChild(渲染块(b, 孤岛.has(b.id)));
+
+  撑开容器();
+  重排if链();
+  撑开容器();      // 重排会改 if 段的位置，外层容器要再算一次
+  画线();
+  输出();
+}
+
+// if 链自动码放：设若 → 否则若 → … → 否则 永远紧贴着，
+// 不管其中哪一段因为放了语句变高、变矮。
+// 不做这一步的话，一段长高就会盖住下面那段（它们是绝对定位，不会自然挤开）。
+function 重排if链() {
+  for (const b of 表.values()) {
+    if (!(块定义[b.类型] && 块定义[b.类型].分支头)) continue;
+
+    let 当前 = b;
+    let y = b.y;
+    let 保护 = 0;
+
+    while (当前 && 保护++ < 100) {
+      当前.y = y;
+      const el = 世界.querySelector(`.blk[data-id="${当前.id}"]`);
+      if (el) el.style.top = y + 'px';
+      y += el ? el.offsetHeight : 100;
+
+      const 下 = 当前.后 ? 表.get(当前.后) : null;
+      if (!下 || !块定义[下.类型] || !块定义[下.类型].分支续) break;
+      当前 = 下;
+    }
+  }
+}
+
+// 容器框自动撑大，包住自己的子块。
+// 块是绝对定位、不在容器 DOM 里，所以只能算包围盒再反写尺寸。
+// 嵌套容器要让内层先算准，所以多算几遍直到收敛。
+function 撑开容器() {
+  for (let 遍 = 0; 遍 < 5; 遍++) {
+    for (const c of 表.values()) {
+      if (!块定义[c.类型].可容纳) continue;
+      const el = 世界.querySelector(`.blk[data-id="${c.id}"]`);
+      if (!el) continue;
+
+      const 子们 = [...表.values()].filter(b => b.父 === c.id);
+      let 右 = 0, 下 = 0;
+      for (const b of 子们) {
+        const be = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+        if (!be) continue;
+        右 = Math.max(右, be.offsetLeft + be.offsetWidth - c.x);
+        下 = Math.max(下, be.offsetTop + be.offsetHeight - c.y);
+      }
+
+      // 普通容器留 150px 的放块区；if 链的分支留 100px，
+      // 比普通容器紧凑、但放得下两三条语句
+      const 定义 = 块定义[c.类型];
+      const 最小高 = (定义.分支头 || 定义.分支续) ? 100 : 150;
+      el.style.width = Math.max(330, 右 + 18) + 'px';
+      el.style.minHeight = Math.max(最小高, 下 + 42) + 'px';
+    }
+  }
+}
+
+function 渲染块(b, 是孤岛) {
+  const 定义 = 块定义[b.类型];
+  const el = document.createElement('div');
+  el.className = 'blk'
+    + (是孤岛 ? ' lonely' : '')
+    + (定义.可容纳 ? ' contain' : '')
+    + (定义.分支续 ? ' chain-cont' : '');
+  el.dataset.t = b.类型;
+  el.dataset.id = b.id;
+  el.style.left = b.x + 'px';
+  el.style.top = b.y + 'px';
+
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.alignItems = 'center';
+  row.style.flexWrap = 'wrap';
+  row.style.gap = '3px';
+
+  const kind = document.createElement('span');
+  kind.className = 'kind';
+  kind.textContent = b.类型;
+  row.appendChild(kind);
+
+  // 中文块旁边的英文对照（淡灰，扫一眼就认得）
+  if (定义.英文) {
+    const en = document.createElement('span');
+    en.className = 'en';
+    en.textContent = 定义.英文;
+    row.appendChild(en);
+  }
+
+  (定义.字段 || []).forEach(f => {
+    const s = document.createElement('input');
+    s.className = 'fld';
+    s.value = b[f.k] || '';
+    s.placeholder = f.提示;          // 灰字：这里该填什么
+
+    const 选项 = 选项池[b.类型 + '.' + f.k];
+    if (选项) {
+      s.classList.add('has-dd');
+      // 聚焦：列出全部；打字：按内容筛
+      s.addEventListener('focus', () => 开下拉(s, 选项, false));
+      s.addEventListener('input', () => {
+        开下拉(s, 选项, true);
+        b[f.k] = s.value;
+        自适应宽(s);
+        输出();
+      });
+    } else {
+      s.addEventListener('input', () => {
+        b[f.k] = s.value;
+        自适应宽(s);
+        输出();
+      });
+    }
+
+    自适应宽(s);
+    s.addEventListener('mousedown', e => e.stopPropagation());
+    row.appendChild(s);
+  });
+
+  // 连线端口：上圆点＝入口，下圆点＝出口。
+  // 按住下圆点往目标块上拖，松手即连上。
+  const 入 = document.createElement('span');
+  入.className = 'port in';
+  入.title = '别人连到这儿';
+  el.appendChild(入);
+
+  const 出 = document.createElement('span');
+  出.className = 'port out';
+  出.title = '按住拖到目标块，松手连上';
+  出.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    开始拖线(b, e);
+  });
+  el.appendChild(出);
+
+  const del = document.createElement('span');
+  del.className = 'del';
+  del.textContent = '✕';
+  del.addEventListener('mousedown', e => e.stopPropagation());
+  del.addEventListener('click', e => {
+    e.stopPropagation();
+    删块(b.id);
+  });
+  row.appendChild(del);
+
+  // if 链的续接按钮：每一段都有「＋否则若」，点哪段就插在哪段后面。
+  // 「否则」必须是最后一段（C# 硬要求），所以：
+  //   · 链里还没有「否则」时，才显示「＋否则」；
+  //   · 点了永远接在链尾，不管点的是哪一段。
+  if (定义.分支头 || 定义.分支续) {
+    const 链 = if链(b);
+    const 前驱 = [...表.values()].find(x => x.后 === b.id && x.父 === b.父);
+    const 前驱是分支 = 前驱 && 块定义[前驱.类型] &&
+                       (块定义[前驱.类型].分支头 || 块定义[前驱.类型].分支续);
+    // 是不是链尾：后面没有分支续的块，也没有「否则」挡着
+    const 是尾 = !(b.后 && 表.get(b.后) && 块定义[表.get(b.后).类型] &&
+                  块定义[表.get(b.后).类型].分支续);
+
+    if (定义.终结分支) {
+      // 「否则」上只给「＋否则若」，点了插在它前面
+      const 插若 = document.createElement('span');
+      插若.className = 'branch-add';
+      插若.textContent = '＋否则若';
+      插若.title = '在这之前插一个条件分支';
+      插若.addEventListener('mousedown', e => e.stopPropagation());
+      插若.addEventListener('click', e => { e.stopPropagation(); 加分支(b, '否则若'); });
+      row.appendChild(插若);
+    } else {
+      // 每一段都能接「否则若」
+      const 加若 = document.createElement('span');
+      加若.className = 'branch-add';
+      加若.textContent = '＋否则若';
+      加若.title = '在这一段后面接一个条件分支';
+      加若.addEventListener('mousedown', e => e.stopPropagation());
+      加若.addEventListener('click', e => { e.stopPropagation(); 加分支(b, '否则若'); });
+      row.appendChild(加若);
+
+      // 「否则」只能是最后一段 —— 按钮只长在链尾那一段上
+      const 链里有否则 = 链.some(x => 块定义[x.类型] && 块定义[x.类型].终结分支);
+      if (是尾 && !链里有否则) {
+        const 加否 = document.createElement('span');
+        加否.className = 'branch-add';
+        加否.textContent = '＋否则';
+        加否.title = '接一个「都不是就…」（只能接在最后）';
+        加否.addEventListener('mousedown', e => e.stopPropagation());
+        加否.addEventListener('click', e => { e.stopPropagation(); 加分支(b, '否则'); });
+        row.appendChild(加否);
+      }
+    }
+  }
+
+  el.appendChild(row);
+
+  if (定义.可容纳) {
+    const a = document.createElement('div');
+    a.className = 'areas';
+    a.textContent = '（把块拖进这个框 = 归它）';
+    el.appendChild(a);
+  }
+
+  // 拖动
+  el.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('fld') || e.target.classList.contains('del')) return;
+    if (e.target.classList.contains('port')) return;
+    开始拖动(b, e, el);
+  });
+
+  return el;
+}
+
+// ---------------- 拖动 ----------------
+function 开始拖动(b, 事件, el) {
+  const 起点 = { x: 事件.clientX, y: 事件.clientY, bx: b.x, by: b.y };
+  // 跟着一起动的：① 容器的子块  ② if 链的其它段（设若/否则若/否则是一体的）
+  const 跟随 = [...子孙(b.id), ...if链(b)].filter(x => x.id !== b.id);
+  const 子起点 = 跟随.map(c => ({ 块: c, x: c.x, y: c.y }));
+  let 动过 = false;
+
+  function 移(e) {
+    const dx = e.clientX - 起点.x, dy = e.clientY - 起点.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) 动过 = true;
+    b.x = 起点.bx + dx; b.y = 起点.by + dy;
+    el.style.left = b.x + 'px'; el.style.top = b.y + 'px';
+    子起点.forEach(s => {
+      s.块.x = s.x + dx; s.块.y = s.y + dy;
+      const ce = 世界.querySelector(`.blk[data-id="${s.块.id}"]`);
+      if (ce) { ce.style.left = s.块.x + 'px'; ce.style.top = s.块.y + 'px'; }
+    });
+    if (动过) 张开附近容器(e.clientX, e.clientY,
+                            el.offsetWidth, el.offsetHeight, b.id, b.父);
+    画线();
+  }
+  function 停() {
+    document.removeEventListener('mousemove', 移);
+    document.removeEventListener('mouseup', 停);
+    // 只是点了一下没拖动：直接结束，别重绘。
+    // 一重绘整个画布重建一次，焦点、下拉、光标全没了，看起来像卡了一下。
+    if (!动过) return;
+    // 千万不能先重绘：重绘会按「当前还挂在这个容器下的子块」重算托盘大小，
+    // 而此刻块的坐标已经跑到托盘外面、父关系却还没改 —— 托盘就会当场撑大去包住它。
+    // 正确顺序：先判归属把父改掉，再重绘。
+    判归属(b);
+    重绘();
+  }
+  document.addEventListener('mousemove', 移);
+  document.addEventListener('mouseup', 停);
+}
+
+// 拖块靠近某个容器时：那个容器高亮并张开，块才掉得进去。
+// 离开时必须还原，否则托盘会一直保持张开，看起来像「越拖越大」。
+// 参数用「鼠标位置 + 被拖块的尺寸」，这样从画布拖、从调色板拖都能共用。
+//
+// 同时记下「鼠标此刻落在哪个容器里」（取面积最小的＝最内层），
+// 松手判归属时直接用它 —— 比事后拿 DOM rect 去算可靠得多，
+// 因为那几个 rect 在松开时已经还原过尺寸了。
+let 悬停容器id = null;
+
+function 张开附近容器(mx, my, 宽需, 高需, 排除id, 排除父id) {
+  悬停容器id = null;
+  let 悬停面积 = Infinity;
+
+  for (const c of 表.values()) {
+    if (!块定义[c.类型].可容纳) continue;
+    if (c.id === 排除id) continue;
+    // 已经住在这个容器里的块，拖它只是挪位置，不是在「放进」——张开只会让框乱跳
+    if (c.id === 排除父id) continue;
+
+    const el = 世界.querySelector(`.blk[data-id="${c.id}"]`);
+    if (!el) continue;
+
+    const r = el.getBoundingClientRect();
+    const 近 = mx >= r.left - 40 && mx <= r.right + 40 &&
+               my >= r.top - 40 && my <= r.bottom + 40;
+
+    if (近) {
+      const 面积 = r.width * r.height;
+      if (面积 < 悬停面积) { 悬停面积 = 面积; 悬停容器id = c.id; }
+    }
+
+    el.classList.toggle('near', 近);
+
+    // if 链的段也扩张，但要把它下面的同链段一起推开，否则会盖住。
+    // （重绘时会按内容重排，所以这里的临时位移不用还原到数据里）
+    const 是分支段 = 块定义[c.类型].分支头 || 块定义[c.类型].分支续;
+    if (是分支段) {
+      if (近 && !el.dataset.open) {
+        el.dataset.open = '1';
+        // dataset 里存的是字符串，必须 Number()，否则 "224" + 70 会拼成 "22470px"
+        el.dataset.h0 = String(el.offsetHeight);
+        const 加 = 70;
+        el.style.minHeight = (Number(el.dataset.h0) + 加) + 'px';
+
+        let 下 = c.后 ? 表.get(c.后) : null;
+        let 保护 = 0;
+        while (下 && 保护++ < 50 &&
+               块定义[下.类型] && 块定义[下.类型].分支续) {
+          const de = 世界.querySelector(`.blk[data-id="${下.id}"]`);
+          if (de) de.style.top = (下.y + 加) + 'px';
+          下 = 下.后 ? 表.get(下.后) : null;
+        }
+      } else if (!近 && el.dataset.open) {
+        el.style.minHeight = Number(el.dataset.h0) + 'px';
+        delete el.dataset.open;
+      }
+      continue;
+    }
+
+    if (近 && !el.dataset.open) {
+      // 第一次进来：记下原尺寸，再按「被拖块的尺寸」撑开
+      // 固定加 50/70 不够 —— 拖进来的块本身就有 330×100，正好盖住原有内容
+      el.dataset.open = '1';
+      el.dataset.w0 = parseFloat(el.style.width) || 330;
+      el.dataset.h0 = parseFloat(el.style.minHeight) || 150;
+
+      el.style.width = Math.max(Number(el.dataset.w0), (宽需 || 330) + 60) + 'px';
+      el.style.minHeight = (Number(el.dataset.h0) + (高需 || 100) + 40) + 'px';
+    } else if (!近 && el.dataset.open) {
+      // 离开：还原，不然后面每走一步都在原基础上累加
+      el.style.width = el.dataset.w0 + 'px';
+      el.style.minHeight = el.dataset.h0 + 'px';
+      delete el.dataset.open;
+    }
+  }
+}
+
+// 把所有被撑开的容器还原（拖完/取消时兜底）
+function 还原所有容器() {
+  for (const c of 表.values()) {
+    const el = 世界.querySelector(`.blk[data-id="${c.id}"]`);
+    if (!el || !el.dataset.open) continue;
+    el.style.width = el.dataset.w0 + 'px';
+    el.style.minHeight = el.dataset.h0 + 'px';
+    delete el.dataset.open;
+    el.classList.remove('near');
+  }
+}
+
+function 子孙(id) {
+  const 直 = [...表.values()].filter(b => b.父 === id);
+  return 直.concat(...直.map(c => 子孙(c.id)));
+}
+
+// if 链：设若 → 否则若 → … → 否则，这几段是一体的，拖任何一段整条一起走
+function if链(b) {
+  const 定义 = 块定义[b.类型];
+  if (!定义 || (!定义.分支头 && !定义.分支续)) return [];
+
+  const 结果 = [];
+
+  // 往后
+  let 当前 = b.后 ? 表.get(b.后) : null;
+  while (当前 && 块定义[当前.类型] && 块定义[当前.类型].分支续) {
+    结果.push(当前);
+    当前 = 当前.后 ? 表.get(当前.后) : null;
+  }
+
+  // 往前
+  let 前 = [...表.values()].find(x => x.后 === b.id && x.父 === b.父);
+  while (前 && 块定义[前.类型] && (块定义[前.类型].分支头 || 块定义[前.类型].分支续)) {
+    结果.push(前);
+    前 = [...表.values()].find(x => x.后 === 前.id && x.父 === 前.父);
+  }
+
+  return 结果;
+}
+
+// 拖完判断归属。
+// 两条路：① 块和容器重叠面积够大 → 归它
+//         ② 鼠标本身落在某个容器里 → 也算（小块面积算百分比很难够，这条兜底）
+function 判归属(b, 鼠标) {
+  if (b.类型 === '类') return;   // 类永远是根
+  const 我 = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+  if (!我) return;
+  const r = 我.getBoundingClientRect();
+  const 我的面积 = r.width * r.height;
+
+  let 命中 = null, 最大 = 0;
+  let 鼠标命中 = null, 鼠标命中面积 = Infinity;
+
+  for (const c of 表.values()) {
+    if (c.id === b.id) continue;
+    if (!块定义[c.类型].可容纳) continue;
+    // 不能把祖先塞进自己的后代里
+    if (子孙(b.id).some(x => x.id === c.id)) continue;
+
+    const ce = 世界.querySelector(`.blk[data-id="${c.id}"]`);
+    if (!ce) continue;
+    const cr = ce.getBoundingClientRect();
+
+    // 鼠标在容器里就算（吸附 40px）。
+    // 嵌套时取面积最小的那个 —— 否则鼠标落在 if 段里，
+    // 外层「类」会因为先被遍历到而抢走这次归属。
+    if (鼠标 && 鼠标.clientX >= cr.left - 40 && 鼠标.clientX <= cr.right + 40 &&
+        鼠标.clientY >= cr.top - 40 && 鼠标.clientY <= cr.bottom + 40) {
+      const 面积 = cr.width * cr.height;
+      if (!鼠标命中 || 面积 < 鼠标命中面积) {
+        鼠标命中 = c;
+        鼠标命中面积 = 面积;
+      }
+    }
+
+    // ① 交集面积
+    const 宽 = Math.min(r.right, cr.right) - Math.max(r.left, cr.left);
+    const 高 = Math.min(r.bottom, cr.bottom) - Math.max(r.top, cr.top);
+    if (宽 <= 0 || 高 <= 0) continue;
+
+    const 面积 = 宽 * 高;
+    const 容器面积 = cr.width * cr.height;
+    // 重叠面积大的优先；差不多时取更小的容器（＝更内层）
+    const 更好 = 面积 > 最大 + 1 ||
+                 (Math.abs(面积 - 最大) <= 1 &&
+                  命中 && 容器面积 < (命中._容器面积 || Infinity));
+    if (更好) {
+      最大 = 面积;
+      命中 = c;
+      命中._容器面积 = 容器面积;
+    }
+  }
+
+  // 归属优先级：
+  //   ① 拖动时鼠标实时压在哪个容器上（最准 —— 你看到它高亮了就是它）
+  //   ② 重叠面积够 15%
+  //   ③ 鼠标当时在哪个容器里
+  const 新父 = 悬停容器id
+             ?? ((命中 && 最大 >= 我的面积 * 0.15) ? 命中.id : null)
+             ?? (鼠标命中 ? 鼠标命中.id : null);
+  if (新父 === b.父) return;
+
+  // 换容器 → 断开它在这一层的所有连线。
+  // 连线只在「同一个托盘里」有意义，块被拖出去还留着线就是归属紊乱。
+  if (b.父) {
+    for (const x of 表.values()) {
+      if (x.父 === b.父 && (x.后 === b.id || x.id === b.id)) x.后 = null;
+    }
+  }
+  b.父 = 新父;
+  b.后 = null;
+
+  // 不自动接线：拖进托盘只是「归属」，谁在前谁在后由你自己连。
+}
+
+function 删块(id) {
+  for (const b of 表.values()) { if (b.后 === id) b.后 = null; if (b.父 === id) b.父 = null; }
+  表.delete(id);
+  重绘();
+}
+
+// 在 if 链上插一段。
+//   「否则若」→ 插在点的那一段后面
+//   「否则」  → 不管点的是哪一段，一律接到链尾（C# 要求它是最后一段）
+function 加分支(上一个, 类型) {
+  const 上 = 世界.querySelector(`.blk[data-id="${上一个.id}"]`);
+  const 高 = 上 ? 上.offsetHeight : 100;
+
+  // 「否则」只能有一个，且只能在最后。已经有了就直接不动。
+  if (类型 === '否则') {
+    const 已有 = [上一个, ...if链(上一个)]
+      .some(x => 块定义[x.类型] && 块定义[x.类型].终结分支);
+    if (已有) return;
+  }
+
+  // 「否则」必须最后：从当前段一路走到链尾再挂
+  let 锚点 = 上一个;
+  if (类型 === '否则') {
+    let 保护 = 0;
+    while (锚点.后 && 保护++ < 100) {
+      const 下 = 表.get(锚点.后);
+      if (!下 || !块定义[下.类型] || !块定义[下.类型].分支续) break;
+      锚点 = 下;
+    }
+  }
+
+  if (块定义[锚点.类型].终结分支) {
+    // 锚点已经是「否则」（只可能发生在「否则」上点 ＋否则若）：插在它前面
+    const 前驱 = [...表.values()].find(x => x.后 === 锚点.id && x.父 === 锚点.父);
+    const 新块 = 建(类型, 锚点.x, 锚点.y);
+    新块.父 = 锚点.父;
+    新块.后 = 锚点.id;
+    if (前驱) 前驱.后 = 新块.id;
+    锚点.y += 高;
+    重绘();
+    输出();
+    return;
+  }
+
+  // 插在锚点后面：先把后面那些 if 分支整体下移，再落到空出来的位置
+  const 后继 = 锚点.后 ? 表.get(锚点.后) : null;
+  if (后继) {
+    let 当前 = 后继;
+    let 保护 = 0;
+    while (当前 && 保护++ < 100 &&
+           块定义[当前.类型] && 块定义[当前.类型].分支续) {
+      当前.y += 高;
+      当前 = 当前.后 ? 表.get(当前.后) : null;
+    }
+  }
+
+  const 新块 = 建(类型, 锚点.x, 锚点.y + 高);
+  新块.父 = 锚点.父;
+  新块.后 = 锚点.后;
+  锚点.后 = 新块.id;
+
+  重绘();
+  输出();
+}
+
+// ---------------- 拖线连接 ----------------
+// 按住块底圆点往目标块上拖，松手就连上；拖到空白处松手＝取消。
+let 拖线 = null;     // { 源块, path, 起x, 起y }
+
+function 开始拖线(源块, e) {
+  const 世界矩形 = 世界.getBoundingClientRect();
+  const el = 世界.querySelector(`.blk[data-id="${源块.id}"]`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', '#7ee787');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-dasharray', '5 4');
+  path.dataset.wire = '1';
+  线层.appendChild(path);
+
+  拖线 = {
+    源块, path,
+    起x: r.left - 世界矩形.left + r.width / 2,
+    起y: r.top - 世界矩形.top + r.height,
+    世界矩形,                      // 拖线期间不会滚动，缓存下来别每帧算
+    鼠标x: e.clientX, 鼠标y: e.clientY,
+    待画: null, 排了帧: false,
+  };
+
+  document.body.classList.add('linking');
+  document.addEventListener('mousemove', 拖线中);
+  document.addEventListener('mouseup', 拖线结束);
+}
+
+function 拖线中(e) {
+  if (!拖线) return;
+  const w = 拖线.世界矩形;
+  const x = e.clientX - w.left;
+  const y = e.clientY - w.top;
+  const 中y = (拖线.起y + y) / 2;
+
+  // 每帧只重绘一次：mousemove 一秒能来上百次，直接 setAttribute 会拖慢手感
+  拖线.待画 = `M${拖线.起x},${拖线.起y} L${拖线.起x},${中y} L${x},${中y} L${x},${y}`;
+  if (!拖线.排了帧) {
+    拖线.排了帧 = true;
+    requestAnimationFrame(() => {
+      if (!拖线) return;
+      拖线.排了帧 = false;
+      if (拖线.待画) 拖线.path.setAttribute('d', 拖线.待画);
+    });
+  }
+}
+
+function 拖线结束(e) {
+  document.removeEventListener('mousemove', 拖线中);
+  document.removeEventListener('mouseup', 拖线结束);
+  document.body.classList.remove('linking');
+  if (!拖线) return;
+
+  const 源块 = 拖线.源块;
+  const 位移 = Math.hypot(e.clientX - 拖线.鼠标x, e.clientY - 拖线.鼠标y);
+  const 目标 = 鼠标下的块(e);
+  拖线.path.remove();
+  拖线 = null;
+
+  // 只是点了一下下圆点，没拖出去 → 断开这块的出线
+  if (位移 < 5) {
+    if (源块.后) { 源块.后 = null; 重绘(); }
+    return;
+  }
+
+  if (目标 && 目标.id !== 源块.id) {
+    // 目标已经在链里的话先摘下来，免得多重前驱
+    for (const x of 表.values()) if (x.后 === 目标.id && x.id !== 源块.id) x.后 = null;
+    源块.后 = 目标.id;
+    重绘();
+    return;
+  }
+
+  // 拖到空白处松手 → 也断开（顺手把旧线撤掉）
+  if (源块.后) { 源块.后 = null; 重绘(); }
+}
+
+// 松手位置落在哪个块上。
+// 容器（类/方法/设若）不参与顺序链 —— 它们靠「拖进去＝归属」决定从属，
+// 不靠连线。不排除的话，拖到托盘空白处松手就会误连到托盘上。
+function 鼠标下的块(e) {
+  let 命中 = null;
+  for (const b of 表.values()) {
+    if (块定义[b.类型].可容纳) continue;
+    const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (e.clientX >= r.left && e.clientX <= r.right &&
+        e.clientY >= r.top && e.clientY <= r.bottom) {
+      const 面积 = r.width * r.height;
+      if (!命中 || 面积 < 命中.面积) 命中 = { 块: b, 面积 };
+    }
+  }
+  return 命中 ? 命中.块 : null;
+}
+
+// ---------------- 画线 ----------------
+// 位置用 rect 算，不用 offsetLeft——offsetParent 一旦不是 #world 就会算错
+function 位置(b) {
+  const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+  if (!el) return null;
+  const wr = 世界.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return { x: r.left - wr.left, y: r.top - wr.top, w: r.width, h: r.height };
+}
+
+function 画线() {
+  // 只删连线，不要 innerHTML='' —— 那会把 <defs> 里的箭头一起清掉
+  [...线层.querySelectorAll('path[data-wire]')].forEach(e => e.remove());
+
+  // SVG 的视口要显式跟 #world 对齐，否则超出默认尺寸的部分会被裁掉
+  const W = 世界.offsetWidth, H = 世界.offsetHeight;
+  线层.setAttribute('width', W);
+  线层.setAttribute('height', H);
+  线层.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // 先清掉上一轮的连接标记
+  世界.querySelectorAll('.blk.from, .blk.to')
+      .forEach(e => e.classList.remove('from', 'to'));
+
+  for (const b of 表.values()) {
+    if (!b.后) continue;
+    const 目标 = 表.get(b.后);
+    if (!目标) continue;
+
+    // if 链内部不画线：设若/否则若/否则 是贴在一起的一整条，
+    // 画线反而多一根箭头插在接缝上，还让人以为它们是顺序执行的两步
+    const 源定 = 块定义[b.类型], 目定 = 块定义[目标.类型];
+    if (源定 && 目定 && (源定.分支头 || 源定.分支续) && 目定.分支续) continue;
+
+    const a = 位置(b), c = 位置(目标);
+    if (!a || !c) continue;
+
+    // 从源块底圆点，到目标块顶圆点；走正交折线，块不对齐时也是方的
+    const 起 = { x: a.x + a.w / 2, y: a.y + a.h };
+    const 终 = { x: c.x + c.w / 2, y: c.y };
+    const 中y = (起.y + 终.y) / 2;
+    const d = Math.abs(起.x - 终.x) < 1
+      ? `M${起.x},${起.y} L${终.x},${终.y}`                    // 对齐就是一条直线
+      : `M${起.x},${起.y} L${起.x},${中y} L${终.x},${中y} L${终.x},${终.y}`;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#4b9fff');
+    path.setAttribute('stroke-width', '1.8');
+    path.setAttribute('marker-end', 'url(#arrow)');
+    path.dataset.wire = '1';
+    线层.appendChild(path);
+
+    世界.querySelector(`.blk[data-id="${b.id}"]`)?.classList.add('from');
+    世界.querySelector(`.blk[data-id="${目标.id}"]`)?.classList.add('to');
+  }
+}
+
+// ---------------- 输出 ----------------
+const out = document.getElementById('out');
+const 警告 = document.getElementById('warn');
+
+function 输出() {
+  try {
+    const 中文 = 生成中文(表);
+    const cs = 中文 ? window.Zh2Unity.译脚本(中文) : '';
+    out.textContent = cs || '// 拖一个「类」过来开始';
+
+    const 孤 = 找孤岛(表);
+    警告.classList.toggle('hidden', !孤.length);
+    警告.textContent = 孤.length
+      ? `⚠ ${孤.length} 个孤岛会被丢掉：` + 孤.map(x => x.块.类型 + (x.块.名 || x.块.值 || '')).join('、')
+      : '';
+  } catch (e) {
+    out.textContent = '生成失败：' + e.message;
+  }
+}
+
+// ---------------- 调色板 ----------------
+const 调 = document.getElementById('palette');
+const 调色板 = document.getElementById('paletteBox');
+const 按组 = window.Blocks.按组归类();
+
+for (const [组名, 类型们] of Object.entries(按组)) {
+  if (!类型们.length) continue;
+
+  const 节 = document.createElement('div');
+  节.className = 'grp-sec';
+
+  const h = document.createElement('h2');
+  h.className = 'grp';
+  const 箭头 = document.createElement('span');
+  箭头.className = 'grp-arrow';
+  箭头.textContent = '▾';
+  h.appendChild(箭头);
+  h.appendChild(document.createTextNode(组名));
+  h.addEventListener('click', () => 节.classList.toggle('collapsed'));
+
+  const 箱 = document.createElement('div');
+  箱.className = 'chips';
+
+  类型们.forEach(类型 => {
+    const c = document.createElement('div');
+    c.className = 'chip';
+
+    const 中 = document.createElement('span');
+    中.textContent = 类型;
+    c.appendChild(中);
+
+    if (块定义[类型].英文) {
+      const en = document.createElement('span');
+      en.className = 'en';
+      en.textContent = 块定义[类型].英文;
+      c.appendChild(en);
+    }
+
+    // 不用 HTML5 drag&drop —— 那套和自定义拖动/拖线的事件模型会打架。
+    // 统一用 pointer 事件：按下生成一个跟手的幽灵块，松手落在画布上就转正。
+    c.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      从调色板拖(类型, e);
+    });
+    c.addEventListener('dblclick', () => 在中间加(类型));
+
+    箱.appendChild(c);
+  });
+
+  节.appendChild(h);
+  节.appendChild(箱);
+  调.appendChild(节);
+}
+
+// 拖右边缘改宽度
+(function 挂拖宽(){
+  const 条 = document.getElementById('resizer');
+  条.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const 起宽 = 调色板.offsetWidth;
+    const 起x = e.clientX;
+    条.classList.add('拖中');
+    document.body.style.cursor = 'col-resize';
+
+    const 移 = ev => {
+      const 宽 = Math.max(110, Math.min(460, 起宽 + ev.clientX - 起x));
+      调色板.style.width = 宽 + 'px';
+    };
+    const 停 = () => {
+      document.removeEventListener('mousemove', 移);
+      document.removeEventListener('mouseup', 停);
+      条.classList.remove('拖中');
+      document.body.style.cursor = '';
+    };
+    document.addEventListener('mousemove', 移);
+    document.addEventListener('mouseup', 停);
+  });
+})();
+
+// 从调色板拖一个块到画布：按下就生成一个跟手的幽灵，松手落在画布上才转正。
+// 锚点＝鼠标落在块内的哪个位置（0=左/上，1=右/下）。
+// 用左上偏内一点，不是正中 —— 抓在块的上沿偏左，块往右下铺开，手感更自然。
+const 拖拽锚点 = { 横: 0.15, 竖: 0.28 };
+
+function 从调色板拖(类型, 起始事件) {
+  // 幽灵直接用真块的渲染结果，看起来和落下去的一模一样
+  const 幽灵 = 渲染块(新块(类型), false);
+  幽灵.classList.add('ghost');
+  幽灵.style.position = 'fixed';
+  幽灵.style.pointerEvents = 'none';
+  幽灵.style.zIndex = 9999;
+  // 幽灵的锚点和落点用同一个比例，两边才不会错位
+  幽灵.style.transform =
+    `translate(${-100 * 拖拽锚点.横}%, ${-100 * 拖拽锚点.竖}%)`;
+  幽灵.style.left = 起始事件.clientX + 'px';
+  幽灵.style.top = 起始事件.clientY + 'px';
+  document.body.appendChild(幽灵);
+
+  const 自己 = { clientX: 起始事件.clientX, clientY: 起始事件.clientY };
+
+  const 移 = ev => {
+    幽灵.style.left = ev.clientX + 'px';
+    幽灵.style.top = ev.clientY + 'px';
+
+    // 从调色板拖也要能撑开目标托盘，不然块落下去就盖住原有内容
+    张开附近容器(ev.clientX, ev.clientY,
+                 幽灵.offsetWidth, 幽灵.offsetHeight, null, null);
+  };
+
+  const 停 = ev => {
+    document.removeEventListener('pointermove', 移);
+    document.removeEventListener('pointerup', 停);
+
+    const 幽灵宽 = 幽灵.offsetWidth || 120;
+    const 幽灵高 = 幽灵.offsetHeight || 32;
+    还原所有容器();
+    幽灵.remove();
+
+    const r = 舞台.getBoundingClientRect();
+    if (ev.clientX < r.left || ev.clientX > r.right ||
+        ev.clientY < r.top || ev.clientY > r.bottom) return;   // 丢在画布外＝取消
+
+    const wr = 世界.getBoundingClientRect();
+    const b = 建(类型,
+      ev.clientX - wr.left - 幽灵宽 * 拖拽锚点.横,
+      ev.clientY - wr.top - 幽灵高 * 拖拽锚点.竖);
+    重绘();
+    // 用「松手时的鼠标位置」判归属 —— 之前传的是按下那一刻的位置，
+    // 那会儿鼠标还在调色板上，当然判不进任何托盘。
+    判归属(b, { clientX: ev.clientX, clientY: ev.clientY });
+    重绘();
+  };
+
+  document.addEventListener('pointermove', 移);
+  document.addEventListener('pointerup', 停);
+}
+
+function 在中间加(类型) {
+  const r = 舞台.getBoundingClientRect();
+  建(类型, 舞台.scrollLeft + r.width / 2 - 60, 舞台.scrollTop + 80);
+  重绘();
+}
+
+document.getElementById('copyBtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(out.textContent);
+    const b = document.getElementById('copyBtn');
+    const 旧 = b.textContent; b.textContent = '已复制 ✓';
+    setTimeout(() => b.textContent = 旧, 1200);
+  } catch { alert('复制失败，手动选中右侧代码'); }
+};
+document.getElementById('clearBtn').onclick = () => { 表.clear(); 重绘(); };
+
+// 预置：一个类 + 两个字段，都连好
+(function 预置(){
+  const 类 = 建('类', 60, 40); 类.名 = '敌人'; 类.继承 = 'MonoBehaviour';
+  const 血 = 建('字段', 90, 130); 血.数据类型 = '整数'; 血.名 = '血量'; 血.值 = '30'; 血.父 = 类.id;
+  const 分 = 建('字段', 90, 190); 分.数据类型 = '整数'; 分.名 = '分'; 分.值 = '10'; 分.父 = 类.id;
+  血.后 = 分.id;
+  重绘();
+})();
+</script>
+</body>
+</html>

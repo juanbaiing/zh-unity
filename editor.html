@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中文套式 · 编辑器</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --line:#252b36;
+    --text:#d7dce4; --dim:#7b8494; --cn:#7ee787; --cs:#79c0ff; --warn:#f0b429;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:"Cascadia Code","Consolas","Courier New",monospace;
+    display:flex;flex-direction:column;
+  }
+  header{
+    padding:8px 14px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;background:var(--panel);
+  }
+  header h1{font-size:13px;margin:0;font-weight:600}
+  header .spacer{flex:1}
+  .modes{display:flex;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .modes button{border:0;border-radius:0;background:#1a1f28;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--dim);font-family:inherit}
+  .modes button.on{background:#2a3547;color:var(--cn)}
+  button{
+    background:#1f2632;color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;
+  }
+  button:hover{background:#2a3342}
+  main{flex:1;display:flex;min-height:0}
+  .pane{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .pane + .pane{border-left:1px solid var(--line)}
+  .pane .title{
+    padding:5px 14px;font-size:12px;color:var(--dim);
+    border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:8px;
+  }
+  .pane .title .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:#1f2632;color:var(--cn)}
+  .pane.out .title .tag{color:var(--cs)}
+  textarea,pre{
+    flex:1;margin:0;padding:12px 14px;border:0;outline:none;resize:none;
+    background:transparent;color:var(--text);
+    font-family:inherit;font-size:13.5px;line-height:1.6;
+    white-space:pre;overflow:auto;tab-size:4;
+  }
+  textarea{caret-color:var(--cn)}
+  pre{color:var(--cs)}
+  .words{
+    background:var(--panel);border-top:1px solid var(--line);
+    max-height:150px;overflow:auto;padding:6px 14px;font-size:12px;
+  }
+  .words summary{cursor:pointer;color:var(--dim);outline:none;padding:2px 0}
+  .words .grp{margin:6px 0}
+  .words .grp b{color:#9aa4b5;display:block;margin-bottom:3px}
+  .words code{color:var(--cn);background:#1a1f28;padding:1px 5px;border-radius:3px;margin:2px 3px 2px 0;display:inline-block}
+  .err{padding:5px 14px;font-size:12px;color:var(--warn);border-top:1px solid var(--line);background:#1a1610}
+  .err.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中文套式 · 编辑器</h1>
+  <div class="modes">
+    <button id="m-stmt">语句</button>
+    <button id="m-unity" class="on">Unity 脚本</button>
+  </div>
+  <span class="spacer"></span>
+  <button id="copyBtn">复制代码</button>
+</header>
+
+<main>
+  <section class="pane src">
+    <div class="title"><span class="tag">中文</span> 套式源码</div>
+    <textarea id="src" spellcheck="false"></textarea>
+  </section>
+  <section class="pane out">
+    <div class="title"><span class="tag">C#</span> 生成的代码</div>
+    <pre id="out"></pre>
+  </section>
+</main>
+
+<details class="words" id="words">
+  <summary>词表（点开看：中文（english）· 写哪个都认）</summary>
+  <div id="wordsBody"></div>
+</details>
+<div class="err hidden" id="err"></div>
+
+<script src="translator.js"></script>
+<script src="unity-words.js"></script>
+<script src="zh2unity.js"></script>
+<script>
+// ---------------- 示例 ----------------
+const 示例_Unity = `使用 UnityEngine
+
+公开的类 敌人 : MonoBehaviour
+
+公开整数 血量 = 30
+公开整数 分 = 10
+公开的 目标 : 变换
+
+无返回 开始时（）
+{
+    打印（"敌人已生成"）
+}
+
+公开的方法 受伤（整数 伤害）
+{
+    血量 = 血量 - 伤害
+    打印（"血量：" + 血量）
+    设若（血量 小于等于 0）
+    {
+        死亡（）
+    }
+}
+
+无返回 死亡（）
+{
+    打印（"死亡，得分 +" + 分）
+    设若（目标 不等于 空）
+    {
+        目标.位置 = 新向量（0, 0, 0）
+    }
+    销毁（自己，1）
+}
+`;
+
+const 示例_语句 = `定义 列表 = new[] { 1, 2, 3, 4, 5 }
+
+遍历（列表 中 x）{
+    设若（x 大于 2）{
+        打印（x）
+    } 否则 {
+        打印（0）
+    }
+}
+`;
+
+// ---------------- 词表渲染 ----------------
+function 渲染词表(){
+  const W = window.UnityWords;
+  const 组 = [
+    ['类型（冒号后）', W.类型词表],
+    ['成员（点号后）', W.成员词表],
+    ['函数', W.函数词表],
+    ['生命周期', W.生命周期词表],
+  ];
+  const body = document.getElementById('wordsBody');
+  body.innerHTML = 组.map(([标题, 表]) => {
+    const 词 = Object.entries(表)
+      .map(([中, 英]) => `<code>${中}（${英}）</code>`).join('');
+    return `<div class="grp"><b>${标题}</b>${词}</div>`;
+  }).join('');
+}
+
+// ---------------- 翻译与渲染 ----------------
+const src = document.getElementById('src');
+const out = document.getElementById('out');
+const errBox = document.getElementById('err');
+let 模式 = 'unity';
+
+function 更新(){
+  try{
+    const 代码 = 模式 === 'unity'
+      ? window.Zh2Unity.译脚本(src.value)
+      : window.翻译(src.value);
+    out.textContent = 代码 || '// 左边写完就实时出现在这里';
+    errBox.classList.add('hidden');
+  }catch(e){
+    errBox.textContent = '翻译出错：' + e.message;
+    errBox.classList.remove('hidden');
+  }
+}
+
+function 切模式(m){
+  模式 = m;
+  document.getElementById('m-stmt').classList.toggle('on', m === 'stmt');
+  document.getElementById('m-unity').classList.toggle('on', m === 'unity');
+  src.value = m === 'unity' ? 示例_Unity : 示例_语句;
+  更新();
+}
+
+document.getElementById('m-stmt').onclick = () => 切模式('stmt');
+document.getElementById('m-unity').onclick = () => 切模式('unity');
+src.addEventListener('input', 更新);
+
+document.getElementById('copyBtn').onclick = async () => {
+  try{
+    await navigator.clipboard.writeText(out.textContent);
+    const b = document.getElementById('copyBtn');
+    const 旧 = b.textContent;
+    b.textContent = '已复制 ✓';
+    setTimeout(() => b.textContent = 旧, 1200);
+  }catch(e){
+    errBox.textContent = '复制失败，手动选中右侧复制';
+    errBox.classList.remove('hidden');
+  }
+};
+
+渲染词表();
+src.value = 示例_Unity;
+更新();
+</script>
+</body>
+</html>

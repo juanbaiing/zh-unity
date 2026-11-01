@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中文套式 · 图形编辑器</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --line:#252b36; --text:#d7dce4; --dim:#7b8494;
+    --cn:#7ee787; --cs:#79c0ff; --kmain:#3b82f6; --kmeth:#a855f7; --kstmt:#22c55e; --kcond:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);
+    font-family:"Cascadia Code","Consolas",monospace;display:flex;flex-direction:column;font-size:13px}
+  header{padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:12px}
+  header h1{font-size:13px;margin:0}
+  header .hint{color:var(--dim);font-size:12px}
+  .spacer{flex:1}
+  button{background:#1f2632;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+  button:hover{background:#2a3342}
+
+  main{flex:1;display:flex;min-height:0}
+  /* 调色板 */
+  .palette{width:150px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    padding:10px 8px;overflow:auto}
+  .palette h2{font-size:11px;color:var(--dim);margin:0 0 8px;font-weight:600;letter-spacing:.5px}
+  .chip{padding:6px 10px;margin-bottom:5px;border-radius:6px;cursor:grab;user-select:none;
+    border:1px dashed #3a4354;background:#1a1f28;font-size:12px}
+  .chip:hover{border-color:var(--cn);color:var(--cn)}
+  .chip[data-t="类"],.chip[data-t="方法"]{border-left:3px solid var(--kmeth)}
+  .chip[data-t="字段"]{border-left:3px solid var(--kmain)}
+  .chip[data-t="设若"],.chip[data-t="只要"],.chip[data-t="重复"]{border-left:3px solid var(--kcond)}
+
+  /* 画布 */
+  .canvas{flex:1;overflow:auto;padding:14px;min-width:0}
+  .root{border:1px dashed #2f3745;border-radius:8px;padding:10px;min-height:120px}
+  .root.over{border-color:var(--cn);background:#141b18}
+  .empty{color:var(--dim);font-size:12px;padding:16px;text-align:center}
+
+  /* 块 */
+  .block{border-radius:7px;margin:6px 0;background:#171c25;border:1px solid #2b3341;
+    border-left-width:3px}
+  .block[data-t="类"]{border-left-color:var(--kmeth)}
+  .block[data-t="字段"]{border-left-color:var(--kmain)}
+  .block[data-t="方法"]{border-left-color:var(--kmeth)}
+  .block[data-t="设若"],.block[data-t="只要"],.block[data-t="重复"]{border-left-color:var(--kcond)}
+  .head{display:flex;align-items:center;gap:6px;padding:6px 8px;flex-wrap:wrap}
+  .kind{font-size:11px;color:var(--dim);background:#1f2632;padding:1px 6px;border-radius:4px;flex:none}
+  .fld{color:var(--cn);border:1px solid transparent;border-radius:4px;padding:1px 4px;
+    outline:none;min-width:30px;background:#12161d}
+  .fld:focus{border-color:var(--cn)}
+  .fld:empty::before{content:attr(data-ph);color:#4a5568}
+  .ctrls{display:flex;gap:2px;flex:none;margin-left:auto}
+  .ctrls button{padding:1px 6px;font-size:11px;line-height:1.4}
+  .slot{margin:0 8px 8px 22px;padding:4px 6px;border-left:2px dotted #3a4354;min-height:24px;border-radius:4px}
+  .slot.over{background:#141b18;border-left-color:var(--cn)}
+  .slot .empty{font-size:11px;color:#4a5568;padding:2px 0}
+
+  /* 代码栏 */
+  .code{width:44%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .code .title{padding:5px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);background:var(--panel)}
+  .code pre{margin:0;padding:12px;overflow:auto;color:var(--cs);font-size:12.5px;line-height:1.55;flex:1;white-space:pre}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中文套式 · 图形编辑器</h1>
+  <span class="hint">左边拖块 → 中间搭结构 → 右边出 C#</span>
+  <span class="spacer"></span>
+  <button id="copyBtn">复制 C#</button>
+  <button id="clearBtn">清空</button>
+</header>
+
+<main>
+  <aside class="palette">
+    <h2>拖到右边</h2>
+    <div id="palette"></div>
+  </aside>
+
+  <section class="canvas">
+    <div class="root" id="root" data-slot="root"></div>
+  </section>
+
+  <section class="code">
+    <div class="title">生成的 C#</div>
+    <pre id="out">// 拖个「类」块过来开始</pre>
+  </section>
+</main>
+
+<script src="translator.js"></script>
+<script src="unity-words.js"></script>
+<script src="zh2unity.js"></script>
+<script src="blocks.js"></script>
+<script>
+const { 块定义, 新块, 生成CSharp } = window.Blocks;
+
+// ---------------- 数据模型 ----------------
+// 每块一个唯一 id，DOM 上带 data-id，方便回查
+let seq = 0;
+const 树 = [];                       // 根块数组
+const 索引 = new Map();              // id -> 块对象
+
+function 建块(类型){
+  const b = 新块(类型);
+  b.id = ++seq;
+  索引.set(b.id, b);
+  return b;
+}
+
+// ---------------- 渲染 ----------------
+const 画布 = document.getElementById('root');
+
+function 渲染块(b){
+  const 定义 = 块定义[b.类型];
+  const el = document.createElement('div');
+  el.className = 'block';
+  el.dataset.t = b.类型;
+  el.dataset.id = b.id;
+
+  const head = document.createElement('div');
+  head.className = 'head';
+
+  const kind = document.createElement('span');
+  kind.className = 'kind';
+  kind.textContent = b.类型;
+  head.appendChild(kind);
+
+  (定义.字段 || []).forEach(f => {
+    const span = document.createElement('span');
+    span.className = 'fld';
+    span.contentEditable = 'true';
+    span.dataset.ph = f.提示;
+    span.textContent = b[f.k] || '';
+    span.addEventListener('input', () => { b[f.k] = span.textContent; 输出(); });
+    head.appendChild(span);
+  });
+
+  const ctrls = document.createElement('span');
+  ctrls.className = 'ctrls';
+  ctrls.innerHTML = `<button data-act="up" title="上移">↑</button>
+                     <button data-act="down" title="下移">↓</button>
+                     <button data-act="del" title="删除">✕</button>`;
+  ctrls.addEventListener('click', e => {
+    const act = e.target.dataset.act;
+    if (!act) return;
+    if (act === 'del') { 删(树, b.id); }
+    if (act === 'up')   { 移(树, b.id, -1); }
+    if (act === 'down') { 移(树, b.id, +1); }
+    重绘();
+  });
+  head.appendChild(ctrls);
+  el.appendChild(head);
+
+  if (定义.可容纳){
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.dataset.slot = b.id;
+    挂拖放(slot, b.子);
+    if (!b.子.length) slot.innerHTML = '<div class="empty">拖块进来</div>';
+    else b.子.forEach(子 => slot.appendChild(渲染块(子)));
+    el.appendChild(slot);
+  }
+
+  return el;
+}
+
+function 重绘(){
+  画布.innerHTML = '';
+  if (!树.length) 画布.innerHTML = '<div class="empty">把左边的「类」拖过来开始</div>';
+  else 树.forEach(b => 画布.appendChild(渲染块(b)));
+  输出();
+}
+
+// ---------------- 增删移 ----------------
+function 删(列表, id){
+  for (let i = 0; i < 列表.length; i++){
+    if (列表[i].id === id){ 列表.splice(i,1); 索引.delete(id); return true; }
+    if (列表[i].子 && 删(列表[i].子, id)) return true;
+  }
+  return false;
+}
+function 移(列表, id, 方向){
+  for (let i = 0; i < 列表.length; i++){
+    if (列表[i].id === id){
+      const j = i + 方向;
+      if (j < 0 || j >= 列表.length) return true;
+      [列表[i], 列表[j]] = [列表[j], 列表[i]];
+      return true;
+    }
+    if (列表[i].子 && 移(列表[i].子, id, 方向)) return true;
+  }
+  return false;
+}
+
+// ---------------- 拖放 ----------------
+// 关键：槽位是嵌在画布里的，drop 会一路冒泡到根容器，
+// 不 stopPropagation 就会“同时加两份”（根一份、类里一份）。
+function 挂拖放(容器, 目标列表){
+  容器.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.stopPropagation();          // 别让父容器也点亮
+    容器.classList.add('over');
+  });
+  容器.addEventListener('dragleave', e => {
+    e.stopPropagation();
+    容器.classList.remove('over');
+  });
+  容器.addEventListener('drop', e => {
+    e.preventDefault();
+    e.stopPropagation();          // 关键：到此为止，不再冒泡
+    容器.classList.remove('over');
+    const 类型 = e.dataTransfer.getData('text/plain');
+    if (!类型 || !块定义[类型]) return;
+    目标列表.push(建块(类型));
+    重绘();
+  });
+}
+
+// 调色板
+const 调色 = document.getElementById('palette');
+Object.keys(块定义).forEach(类型 => {
+  const c = document.createElement('div');
+  c.className = 'chip';
+  c.dataset.t = 类型;
+  c.draggable = true;
+  c.textContent = 类型;
+  c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', 类型));
+  // 双击也能加（不想拖的时候）
+  c.addEventListener('dblclick', () => { 树.push(建块(类型)); 重绘(); });
+  调色.appendChild(c);
+});
+
+挂拖放(画布, 树);
+
+// ---------------- 输出 ----------------
+const out = document.getElementById('out');
+function 输出(){
+  try {
+    out.textContent = 树.length ? 生成CSharp(树) : '// 拖个「类」块过来开始';
+  } catch (e) {
+    out.textContent = '生成失败：' + e.message;
+  }
+}
+
+// ---------------- 其它按钮 ----------------
+document.getElementById('clearBtn').onclick = () => {
+  树.length = 0; 索引.clear(); 重绘();
+};
+document.getElementById('copyBtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(out.textContent);
+    const b = document.getElementById('copyBtn');
+    const 旧 = b.textContent; b.textContent = '已复制 ✓';
+    setTimeout(() => b.textContent = 旧, 1200);
+  } catch (e) { alert('复制失败，手动选中右侧代码'); }
+};
+
+// 预置：你画的敌人脚本
+(function 预置(){
+  const 类 = 建块('类'); 类.名 = '敌人'; 类.继承 = 'MonoBehaviour';
+  const 血 = 建块('字段'); 血.数据类型 = '整数'; 血.名 = '血量'; 血.值 = '30';
+  const 分 = 建块('字段'); 分.数据类型 = '整数'; 分.名 = '分'; 分.值 = '10';
+  const 目 = 建块('字段'); 目.数据类型 = '变换'; 目.名 = '目标';
+  const 开 = 建块('方法'); 开.名 = '开始时';
+  const 打 = 建块('打印'); 打.值 = '"敌人已生成"';
+  开.子.push(打);
+  const 受 = 建块('方法'); 受.名 = '受伤'; 受.参数 = '整数 伤害'; 受.公开 = true;
+  const 减 = 建块('赋值'); 减.左 = '血量'; 减.右 = '血量 - 伤害';
+  const 打2 = 建块('打印'); 打2.值 = '"血量：" + 血量';
+  const 判 = 建块('设若'); 判.条件 = '血量 小于等于 0';
+  const 调 = 建块('调用'); 调.名 = '死亡';
+  判.子.push(调);
+  受.子.push(减, 打2, 判);
+  类.子.push(血, 分, 目, 开, 受);
+  树.push(类);
+  重绘();
+})();
+</script>
+</body>
+</html>

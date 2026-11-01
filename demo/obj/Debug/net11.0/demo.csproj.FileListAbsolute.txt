@@ -1,0 +1,16 @@
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.GeneratedMSBuildEditorConfig.editorconfig
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.AssemblyInfoInputs.cache
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.AssemblyInfo.cs
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.csproj.CoreCompileInputs.cache
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.exe
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.deps.json
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.runtimeconfig.json
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.runtimeconfig.dev.json
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.dll
+D:\dswork\zh-csharp-lab\demo\bin\Debug\net11.0\demo.pdb
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.dll
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\refint\demo.dll
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.pdb
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.genruntimeconfig.cache
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\ref\demo.dll
+D:\dswork\zh-csharp-lab\demo\obj\Debug\net11.0\demo.csproj.Up2Date

@@ -1,0 +1,1592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中文套式 · 自由画布</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --line:#252b36; --text:#d7dce4; --dim:#7b8494;
+    --cn:#7ee787; --cs:#79c0ff; --bad:#ff6b6b;
+    --kcontain:#a855f7; --kstmt:#22c55e; --kdata:#3b82f6; --kcond:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:#12161d}
+  *::-webkit-scrollbar-thumb{background:#2b3341;border-radius:5px;border:2px solid #12161d}
+  html,body{height:100%;margin:0;scrollbar-color:#2b3341 #12161d;scrollbar-width:thin}
+  body{background:var(--bg);color:var(--text);font-family:"Cascadia Code","Consolas",monospace;
+    font-size:12.5px;display:flex;flex-direction:column;overflow:hidden}
+
+  header{padding:7px 12px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:10px;flex:none}
+  header h1{font-size:13px;margin:0}
+  .hint{color:var(--dim);font-size:11.5px}
+  .spacer{flex:1}
+  .dirchip{font-size:11px;color:var(--dim);padding:3px 9px;border-radius:4px;
+    border:1px solid var(--line);cursor:pointer;max-width:300px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
+  .dirchip:hover{color:var(--cn);border-color:var(--cn)}
+  .dirchip.设过{color:#8fae9a}
+  .dirchip.文件{max-width:360px}
+  button{background:#1f2632;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:4px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  button:hover{background:#2a3342}
+
+  /* 顶栏的标签页：一个标签 = 一张画布 = 一个 Unity 脚本 */
+  .tabs{display:flex;flex:none;background:#12161d;border-bottom:1px solid var(--line);
+    overflow-x:auto;padding:0 4px}
+  .tabs::-webkit-scrollbar{height:4px}
+  .tab{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;
+    color:var(--dim);cursor:pointer;white-space:nowrap;border-top:2px solid transparent;
+    background:#161a21;user-select:none}
+  .tab:hover{color:var(--text);background:#1a2028}
+  .tab.active{background:var(--bg);color:var(--text);border-top-color:var(--cn)}
+  .tab .x{opacity:0;font-size:10px;padding:0 2px}
+  .tab:hover .x{opacity:.6}
+  .tab .x:hover{opacity:1;color:var(--bad)}
+  .tab.新{color:#5a6478;font-size:14px;padding:3px 12px}
+  .tab.新:hover{color:var(--cn)}
+
+  main{flex:1;display:flex;min-height:0}
+
+  .palette{width:170px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    padding:8px 7px;overflow:auto;position:relative}
+  /* 用 grid + auto-fill：栏拖宽了列数自己变，不用改一个数字 */
+  #palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));
+    gap:12px 8px;align-items:start}
+  .grp-sec{min-width:0}
+  .chips{display:flex;flex-direction:column;gap:3px}
+  .palette h2{font-size:10.5px;color:var(--dim);margin:0 0 6px}
+  .palette h2.grp{font-size:10px;color:#5a6478;margin:8px 0 4px;padding-bottom:3px;
+    border-bottom:1px solid #232a36;letter-spacing:1px;cursor:pointer;
+    display:flex;align-items:center;gap:4px;user-select:none}
+  .palette h2.grp:hover{color:var(--cn)}
+  .grp-arrow{font-size:9px;transition:transform .12s;display:inline-block}
+  .grp-sec.collapsed .grp-arrow{transform:rotate(-90deg)}
+  .grp-sec.collapsed .chips{display:none}
+
+  .chip{padding:4px 8px;border-radius:5px;cursor:grab;user-select:none;
+    border:1px dashed #3a4354;background:#1a1f28;font-size:11.5px;
+    display:flex;align-items:baseline;gap:5px;white-space:nowrap;
+    overflow:hidden;min-width:0}
+  .chip:hover{border-color:var(--cn);color:var(--cn)}
+  /* 中文名不许被挤掉；英文太长就出省略号，鼠标停上去看全名 */
+  .chip > span:first-child{flex:none}
+  .en{font-size:10px;color:#4a5568;font-style:italic;user-select:none;
+    flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+  .stage{flex:1;overflow:auto;min-width:0}
+  #world{position:relative;width:2400px;height:1600px;
+    background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
+  #hintEmpty{position:absolute;left:40px;top:40px;color:#4a5568;font-size:12px}
+
+  /* 所有块都是绝对定位 —— 画布上自由摆，容器里也自由摆 */
+  .blk{position:absolute;background:#171c25;border:1px solid #2b3341;
+    border-left:3px solid var(--kstmt);border-radius:5px;
+    min-width:150px;box-shadow:0 2px 6px #0006;z-index:2}
+  .blk[data-t="类"],.blk[data-t="方法"],.blk[data-t="构造函数"]{border-left-color:var(--kcontain)}
+  .blk[data-t="设若"],.blk[data-t="否则若"],.blk[data-t="否则"],
+  .blk[data-t="重复"],.blk[data-t="只要"],.blk[data-t="遍历"],
+  .blk[data-t="多分支"],.blk[data-t="遇"],.blk[data-t="其他"],
+  .blk[data-t="尝试"],.blk[data-t="捕获"],.blk[data-t="读按键"]{border-left-color:var(--kcond)}
+  .blk[data-t="字段"],.blk[data-t="属性"],.blk[data-t="数组"],.blk[data-t="新建列表"]{border-left-color:var(--kdata)}
+  .blk.容器{background:#141922}
+  .blk.dragging{opacity:.85;z-index:999}
+  .blk.孤岛{border-color:var(--bad);border-left-color:var(--bad)}
+
+  .head{display:flex;align-items:center;gap:5px;padding:5px 8px;flex-wrap:wrap;
+    cursor:move;user-select:none}
+  .ord{font-size:10px;color:#5a6478;min-width:14px;text-align:center;
+    border-right:1px solid #2b3341;padding-right:4px;user-select:none}
+  .kind{font-size:10px;color:var(--dim);background:#1f2632;padding:0 5px;border-radius:3px}
+  .fld{color:var(--cn);border:1px solid transparent;border-radius:3px;padding:0 5px;color-scheme:dark;
+    outline:none;background:#12161d;font-size:11.5px;font-family:inherit;
+    height:20px;line-height:18px;vertical-align:middle;cursor:text}
+  .fld:focus{border-color:var(--cn);background:#0d1117}
+  .fld::placeholder{color:#4a5568}
+  .ctl{color:#6b7688;cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
+  .ctl:hover{color:var(--cn)}
+  .ctl.del:hover{color:var(--bad)}
+  .ctl.选{font-size:10px;padding:0 4px;color:#6b7688}
+  .ctl.选:hover{color:var(--cn)}
+
+  .选项层{position:fixed;z-index:9998;min-width:130px;max-width:340px;max-height:280px;
+    overflow:auto;padding:4px;background:#1a2029;border:1px solid #2f3a49;
+    border-radius:6px;box-shadow:0 10px 30px #000b}
+  .选项行{padding:4px 9px;border-radius:4px;color:#c3ccd8;font-size:11.5px;
+    cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .选项行:hover{background:#243040;color:var(--cn)}
+  .选项行.选中{color:var(--cn);background:#1c2a22}
+
+  .ctl.问{font-weight:bold;font-size:12px;padding:0 5px}
+  .ctl.问:hover{color:var(--cn)}
+
+  .说明卡{position:fixed;z-index:9999;max-width:330px;padding:10px 13px;
+    background:#1a2029;border:1px solid #2f3a49;border-left:3px solid var(--cn);
+    border-radius:7px;box-shadow:0 10px 30px #000b;
+    font-size:12px;line-height:1.7;color:#c3ccd8;white-space:normal}
+  .说明头{margin-bottom:5px}
+  .说明头 b{color:var(--cn);font-size:13px;margin-right:7px}
+  .说明头 .en{font-size:10.5px;color:#5a6478;font-style:italic}
+  .说明文{white-space:pre-wrap}
+
+  /* 容器的内容区：一块小画布，里面的块照样绝对定位、随便摆 */
+  .body{position:relative;margin:0 8px 10px 16px;
+    border:1px dashed #2b3341;border-radius:5px;
+    min-width:var(--w, 120px);
+    min-height:var(--h, 56px);
+    background:#10151c}
+  /* 不要给 min-width/min-height 加 transition。
+     尺寸是「算出来写死」的，过渡会让写入值和实际渲染差一截，
+     量出来全是过渡起点 —— 而且每一层都差，叠起来就是内层戳出外层。 */
+  /* 拖块靠近：只做高亮，不在这里改尺寸。
+     改尺寸必须沿祖先链一起改 —— 见 延长链()。
+     只给这一层加 min-height，它爹那块照样那么高，
+     结果就是内容区从容器里戳出去。 */
+  .body.over{
+    border-color:var(--cn);
+    background:#122019;
+    box-shadow:inset 0 0 0 1px #7ee78744;
+  }
+  .body::after{content:'拖块进来';position:absolute;left:8px;top:6px;
+    color:#39424f;font-size:11px;pointer-events:none}
+  .body:has(> .blk)::after{display:none}
+
+  .palette-grip{position:absolute;top:0;right:-3px;width:8px;height:100%;
+    cursor:col-resize;z-index:6}
+  .palette-grip::after{content:'';position:absolute;top:50%;left:3px;width:2px;height:34px;
+    margin-top:-17px;background:#39424f;border-radius:1px;transition:background .12s}
+  .palette-grip:hover::after,.palette-grip.按着::after{background:var(--cn)}
+  .palette-grip:hover,.palette-grip.按着{background:#7ee78722}
+
+  .孤岛提示{position:absolute;left:40px;top:12px;padding:4px 10px;border-radius:5px;
+    background:#2a1414;color:var(--bad);font-size:11.5px;border:1px solid #442020;
+    z-index:50;pointer-events:none}
+  .孤岛提示.hidden{display:none}
+  .fld.有选项{cursor:pointer}
+
+  .palette.回收{background:#2a1414;box-shadow:inset 0 0 0 2px #ff6b6b66}
+  .palette.回收::after{content:'松手删掉';position:absolute;left:12px;bottom:12px;
+    color:var(--bad);font-size:11px;pointer-events:none}
+
+  .branch{border-top:1px dashed #2b3341}
+  .branch .head{cursor:default}
+
+  .code{width:38%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  .codelines{margin:0;padding:6px 0;overflow:auto;flex:1;
+    font-size:11.5px;line-height:1.55;white-space:pre;
+    font-family:inherit;user-select:text}
+  .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
+  .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
+    color:#39424f;user-select:none;font-size:10.5px}
+  .codelines .tx{flex:1;min-width:0;white-space:pre;color:var(--cs);word-break:break-all}
+  .codelines .ln.bad{background:#2a1414}
+  .codelines .ln.bad .tx{color:#ff9a9a}
+  .codelines .ln.warn2{background:#241f10}
+  .codelines .ln.warn2 .tx{color:#f0c674}
+  .codelines .ln.闪{background:#1c3326}
+
+  .errcount{float:right;font-size:10.5px;color:var(--dim)}
+  .errcount.有错{color:var(--bad)}
+  .errs{flex:none;max-height:38%;overflow:auto;border-top:1px solid #442020;
+    background:#1a1010}
+  .errs.hidden{display:none}
+  .err{display:flex;gap:8px;padding:4px 10px;font-size:11.5px;cursor:pointer;
+    border-bottom:1px solid #2a1a1a;line-height:1.45}
+  .err:hover{background:#2a1a1a}
+  .err .码{flex:none;width:52px;color:#d08080;font-size:10.5px}
+  .err .位{flex:none;width:44px;color:#7b8494;font-size:10.5px}
+  .err .说{flex:1;min-width:0;color:#e0c0c0}
+  .err.警{opacity:.75}
+  .err.警 .码{color:#c8a060}
+  .warn{padding:4px 10px;background:#2a1414;color:var(--bad);font-size:11px;
+    border-top:1px solid #442020}
+  .warn.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中文套式 · 自由画布</h1>
+  <span class="hint">块随便摆 ｜ 拖进虚线框 = 进那个盒子 ｜ 盒子里也能随便摆</span>
+  <span class="spacer"></span>
+  <button id="undoBtn" title="Ctrl+Z">↶ 撤销</button>
+  <button id="redoBtn" title="Ctrl+Y">↷ 重做</button>
+  <span id="curFile" class="dirchip 文件" title="这份画布存到哪个 .cs">本份：还没存过</span>
+  <span id="engineDir" class="dirchip" title="编译检查要用的引擎目录">引擎：自动找</span>
+  <span id="unityDir" class="dirchip" title="设置不了">Unity 目录：未设</span>
+  <button id="saveUnityBtn" title="直接写进 Unity 项目的 Assets 目录（整份覆盖）">存到 Unity</button>
+  <button id="copyBtn">复制 C#</button>
+  <button id="clearBtn">清空</button>
+</header>
+
+<nav id="tabs" class="tabs"></nav>
+
+<main>
+  <aside class="palette">
+    <h2>点一下加块</h2>
+    <div id="palette"></div>
+  </aside>
+
+  <section class="stage">
+    <div id="world"><div id="hintEmpty">从左边点一个块开始</div></div>
+  </section>
+
+  <section class="code">
+    <div class="title">生成的 C#<span id="errCount" class="errcount"></span></div>
+    <div class="codelines" id="out"></div>
+    <div class="warn hidden" id="warn"></div>
+    <div class="errs hidden" id="errs"></div>
+  </section>
+</main>
+
+<script src="translator.js"></script>
+<script src="unity-words.js"></script>
+<script src="zh2unity.js"></script>
+<script src="blocks.js"></script>
+<script src="blocks2.js"></script>
+<script>
+const { 块定义 } = window.Blocks;
+const 树 = window.树;
+
+let 根块们 = [];
+let 序号递 = 0;
+const 世界 = document.getElementById('world');
+const 舞台 = document.querySelector('.stage');
+const out = document.getElementById('out');
+const 警告 = document.getElementById('warn');
+
+// 每块自己的坐标都相对它所在的画布（顶层相对 #world，容器内相对 .body）
+function 建(类型, x, y) {
+  const b = 树.新(类型);
+  b.x = x; b.y = y;
+  return b;
+}
+
+function 自适应宽(el) {
+  let 宽 = 0;
+  for (const ch of el.value) 宽 += ch.charCodeAt(0) > 255 ? 15 : 8;
+  el.style.width = Math.max(44, 宽 + 26) + 'px';
+}
+
+// ---------------- 渲染 ----------------
+function 渲染块(b, 序) {
+  const 定义 = 块定义[b.类型];
+  const el = document.createElement('div');
+  el.className = 'blk' + (定义.可容纳 ? ' 容器' : '');
+  el.dataset.t = b.类型;
+  el.dataset.id = b.id;
+  el.style.left = (b.x || 0) + 'px';
+  el.style.top = (b.y || 0) + 'px';
+
+  const head = document.createElement('div');
+  head.className = 'head';
+
+  if (序) {
+    const ord = document.createElement('span');
+    ord.className = 'ord';
+    ord.textContent = 序;
+    ord.title = '这块在它这一层里第 ' + 序 + ' 个执行';
+    head.appendChild(ord);
+  }
+
+  const kind = document.createElement('span');
+  kind.className = 'kind';
+  kind.textContent = b.类型;
+  head.appendChild(kind);
+
+  if (定义.英文) {
+    const en = document.createElement('span');
+    en.className = 'en';
+    en.textContent = 定义.英文;
+    head.appendChild(en);
+  }
+
+  (定义.字段 || []).forEach(f => {
+    const s = document.createElement('input');
+    s.className = 'fld';
+    s.value = b.字段[f.k] ?? '';
+    s.placeholder = f.提示;
+    自适应宽(s);
+    s.addEventListener('input', () => { b.字段[f.k] = s.value; 自适应宽(s); 输出(); });
+    // 这里**不能** stopPropagation —— 拦掉了，块就收不到 pointerdown，
+    // 于是「按在字上」永远拖不动。放它冒泡，交给 阈值拖 看你是点还是拖。
+    head.appendChild(s);
+    // 定义里给了「选项」就再挂一个 ▾：点开是自绘的列表（原生 datalist 弹窗
+    // 是白底、CSS 管不到，暗色主题里刺眼）。输入框照样能直接打字。
+    if (f.选项 && f.选项.length) {
+      const 箭 = document.createElement('span');
+      箭.className = 'ctl 选';
+      箭.textContent = '▾';
+      箭.title = '从常用的里面挑一个';
+      箭.addEventListener('pointerdown', e => e.stopPropagation());
+      箭.addEventListener('click', e => { e.stopPropagation(); 开选项(s, f.选项); });
+      head.appendChild(箭);
+    }
+  });
+
+  if (b.类型 === '设若') {
+    if (!b.分支.some(x => x.终结)) {
+      head.appendChild(做按钮('＋否则若', '再加一个条件分支', () => {
+        树.加分支(b, { 条件: '变量 大于 0' }, false); 重画();
+      }));
+      head.appendChild(做按钮('＋否则', '都不是就…', () => {
+        树.加分支(b, {}, true); 重画();
+      }));
+    }
+  }
+
+  if (window.Blocks.块说明[b.类型]) {
+    head.appendChild(做按钮('?', '这块是干什么用的', () => 显示说明(b.类型, el), '问'));
+  }
+
+  head.appendChild(做按钮('✕', '删除', () => {
+    if (!树.删(根块们, b.id)) 根块们 = 根块们.filter(x => x !== b);
+    重画();
+  }, 'del'));
+
+  el.appendChild(head);
+
+  if (定义.可容纳) el.appendChild(做内容区(b.子));
+
+  b.分支.forEach((段, i) => {
+    const br = document.createElement('div');
+    br.className = 'branch';
+
+    const bh = document.createElement('div');
+    bh.className = 'head';
+
+    const k2 = document.createElement('span');
+    k2.className = 'kind';
+    k2.textContent = 段.终结 ? '否则' : '否则若';
+    bh.appendChild(k2);
+
+    const en2 = document.createElement('span');
+    en2.className = 'en';
+    en2.textContent = 段.终结 ? 'else' : 'else if';
+    bh.appendChild(en2);
+
+    if (!段.终结) {
+      const s = document.createElement('input');
+      s.className = 'fld';
+      s.value = 段.字段.条件 ?? '';
+      s.placeholder = '再判一个条件';
+      自适应宽(s);
+      s.addEventListener('input', () => { 段.字段.条件 = s.value; 自适应宽(s); 输出(); });
+      bh.appendChild(s);
+    }
+
+    // 每一段底下都能再插一个条件分支 —— 不是只有链尾能加
+    if (!段.终结) {
+      bh.appendChild(做按钮('＋否则若', '在这段后面插一个条件分支', () => {
+        b.分支.splice(i + 1, 0, { 字段: { 条件: '变量 大于 0' }, 子: [], 终结: false });
+        重画();
+      }));
+    }
+    // 否则只有一个，而且只能贴在最后
+    if (!段.终结 && !b.分支.some(x => x.终结)) {
+      bh.appendChild(做按钮('＋否则', '都不是就…', () => {
+        b.分支.push({ 字段: {}, 子: [], 终结: true });
+        重画();
+      }));
+    }
+    bh.appendChild(做按钮('✕', '删掉这一分支', () => { b.分支.splice(i, 1); 重画(); }, 'del'));
+    br.appendChild(bh);
+    br.appendChild(做内容区(段.子));
+    el.appendChild(br);
+  });
+
+  挂拖动(b, el);
+
+  return el;
+}
+
+// ---------------- 自绘下拉 ----------------
+let 选项层 = null, 选项锚 = null;
+
+function 关选项() {
+  if (选项层) 选项层.remove();
+  选项层 = null;
+  选项锚 = null;
+}
+
+function 开选项(s, 选项们) {
+  if (选项锚 === s) { 关选项(); return; }
+  关选项();
+
+  const 层 = document.createElement('div');
+  层.className = '选项层';
+  for (const v of 选项们) {
+    const 行 = document.createElement('div');
+    行.className = '选项行' + (v === s.value ? ' 选中' : '');
+    行.textContent = v;
+    行.addEventListener('pointerdown', e => e.preventDefault());   // 别让输入框先失焦
+    行.addEventListener('click', e => {
+      e.stopPropagation();
+      s.value = v;
+      s.dispatchEvent(new Event('input', { bubbles: true }));
+      关选项();
+    });
+    层.appendChild(行);
+  }
+  document.body.appendChild(层);
+
+  const 锚r = s.getBoundingClientRect();
+  const 层r = 层.getBoundingClientRect();
+  let 左 = Math.min(window.innerWidth - 层r.width - 8, Math.max(8, 锚r.left));
+  let 上 = 锚r.bottom + 5;
+  if (上 + 层r.height > window.innerHeight - 8) 上 = Math.max(8, 锚r.top - 层r.height - 5);
+  层.style.left = Math.round(左) + 'px';
+  层.style.top = Math.round(上) + 'px';
+
+  选项层 = 层;
+  选项锚 = s;
+}
+
+document.addEventListener('pointerdown', e => {
+  if (!选项层) return;
+  if (选项层.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('选')) return;
+  关选项();
+}, true);
+
+// ---------------- 说明浮层 ----------------
+// 点块上的 ? 弹出这块的说明。做成浮层而不是往块里塞——
+// 塞进去会把块撑高，跟着影响布局和顺序，只为了看一段字不值当。
+let 说明卡 = null, 说明锚 = null;
+
+function 关说明() {
+  if (说明卡) 说明卡.remove();
+  说明卡 = null;
+  说明锚 = null;
+}
+
+function 显示说明(类型, 锚) {
+  if (说明锚 === 锚) { 关说明(); return; }
+  关说明();
+
+  const 定义 = 块定义[类型];
+  const 卡 = document.createElement('div');
+  卡.className = '说明卡';
+
+  const 头行 = document.createElement('div');
+  头行.className = '说明头';
+  const 名 = document.createElement('b');
+  名.textContent = 类型;
+  头行.appendChild(名);
+  if (定义.英文) {
+    const en = document.createElement('span');
+    en.className = 'en';
+    en.textContent = 定义.英文;
+    头行.appendChild(en);
+  }
+  卡.appendChild(头行);
+
+  const 文 = document.createElement('div');
+  文.className = '说明文';
+  文.textContent = window.Blocks.块说明[类型] || '（还没有写说明）';
+  卡.appendChild(文);
+
+  document.body.appendChild(卡);
+
+  const 锚r = 锚.getBoundingClientRect();
+  const 卡r = 卡.getBoundingClientRect();
+  let 左 = Math.min(window.innerWidth - 卡r.width - 8, Math.max(8, 锚r.left));
+  let 上 = 锚r.bottom + 8;
+  if (上 + 卡r.height > window.innerHeight - 8) 上 = Math.max(8, 锚r.top - 卡r.height - 8);
+  卡.style.left = Math.round(左) + 'px';
+  卡.style.top = Math.round(上) + 'px';
+
+  说明卡 = 卡;
+  说明锚 = 锚;
+}
+
+document.addEventListener('pointerdown', e => {
+  if (!说明卡) return;
+  if (说明卡.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('问')) return;
+  关说明();
+}, true);
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { 关说明(); 关选项(); } });
+
+function 做按钮(文字, 提示, 处理, 额外类) {
+  const s = document.createElement('span');
+  s.className = 'ctl' + (额外类 ? ' ' + 额外类 : '');
+  s.textContent = 文字;
+  s.title = 提示;
+  s.addEventListener('pointerdown', e => e.stopPropagation());
+  s.addEventListener('click', e => { e.stopPropagation(); 处理(); });
+  return s;
+}
+
+// ---------------- 布局 ----------------
+// 子块是绝对定位，撑不开内容区；内容区变高，爹那块会自动变高，
+// 但再往上一层又变成绝对定位 —— 链就断在那儿。
+// 所以尺寸只能自己算，而且**一次算到底**：
+//
+//   内容区宽 = max(子块右边界) + 间距
+//   内容区高 = max(子块下边界) + 间距      ← 间距固定，这就是「下边界之间的距离」
+//   块高     = 头高 + 内容区高 + 底距 [+ 每个分支的同款]
+//
+// 全程只量两样东西：块的「头」有多高、叶子块有多大。
+// 这两样都只受自己内容影响，不受容器影响 —— 量一次就准，量完再也不用回头。
+const 布 = {
+  间距: 20,      // 子块下边界 → 内容区下边界，固定值
+  最小宽: 120,
+  最小高: 56,
+  侧距: 24,      // 内容区左右 margin：16 + 8
+  底距: 10,      // 内容区 margin-bottom（必须和 CSS 的 .body margin 一致）
+  分支线: 1,     // .branch 的 border-top
+  边框: 2,       // 内容区上下各 1px 虚线
+};
+
+function 布局(根们) {
+  const 图 = new Map();
+  (function 走(列表) {
+    for (const b of 列表) {
+      图.set(b.id, b);
+      走(b.子 || []);
+      for (const 段 of b.分支 || []) 走(段.子 || []);
+    }
+  })(根们);
+
+  const 头高 = new Map();
+  const 段头高 = new Map();
+  const 叶 = new Map();
+  for (const el of 世界.querySelectorAll('.blk')) {
+    const id = Number(el.dataset.id);
+    const 头 = el.querySelector(':scope > .head');
+    if (头) 头高.set(id, 头.getBoundingClientRect().height);
+    段头高.set(id, [...el.querySelectorAll(':scope > .branch > .head')]
+      .map(x => x.getBoundingClientRect().height));
+    if (!el.querySelector(':scope > .body')) {
+      const r = el.getBoundingClientRect();
+      叶.set(id, { 宽: r.width, 高: r.height });
+    }
+  }
+
+  // 一个内容区该多大（只看它的子块，不看 DOM）
+  function 体(子们) {
+    let 宽 = 布.最小宽, 高 = 布.最小高;
+    for (const c of 子们 || []) {
+      宽 = Math.max(宽, (c.x || 0) + 块宽(c) + 布.间距);
+      高 = Math.max(高, (c.y || 0) + 块高(c) + 布.间距);
+    }
+    return { 宽, 高 };
+  }
+
+  function 块宽(b) {
+    const s = 叶.get(b.id);
+    if (s) return s.宽;
+    let w = 体(b.子).宽;
+    for (const 段 of b.分支 || []) w = Math.max(w, 体(段.子).宽);
+    return w + 布.侧距;
+  }
+
+  function 块高(b) {
+    const s = 叶.get(b.id);
+    if (s) return s.高;
+    let h = 头高.get(b.id) || 34;
+    if (!块定义[b.类型].可容纳) return h;
+    h += 体(b.子).高 + 布.底距;
+    const 段s = 段头高.get(b.id) || [];
+    (b.分支 || []).forEach((段, i) => {
+      h += (段s[i] || 34) + 布.分支线 + 体(段.子).高 + 布.底距;
+    });
+    return h;
+  }
+
+  // 把算出来的高度记回树对象：生成顺序要拿它判断「哪几块垂直上重叠 = 同一行」
+  (function 记高(列表) {
+    for (const b of 列表) {
+      b._h = 块高(b);
+      b._w = 块宽(b);
+      记高(b.子 || []);
+      for (const 段 of b.分支 || []) 记高(段.子 || []);
+    }
+  })(根们);
+
+  刷顺序(根们, 世界);
+
+  // 尺寸算完，写回各内容区
+  for (const el of 世界.querySelectorAll('.blk')) {
+    const b = 图.get(Number(el.dataset.id));
+    if (!b) continue;
+    const 主 = el.querySelector(':scope > .body');
+    if (主) 写盒(主, 体(b.子));
+    [...el.querySelectorAll(':scope > .branch')].forEach((段el, i) => {
+      const 段 = (b.分支 || [])[i];
+      if (!段) return;
+      const bb = 段el.querySelector(':scope > .body');
+      if (bb) 写盒(bb, 体(段.子));
+    });
+  }
+}
+
+function 写盒(body, s) {
+  const 宽 = Math.round(s.宽 + 布.边框);
+  const 高 = Math.round(s.高 + 布.边框);
+  body.style.setProperty('--w', 宽 + 'px');
+  body.style.setProperty('--h', 高 + 'px');
+  body.style.minWidth = 宽 + 'px';
+  body.style.minHeight = 高 + 'px';
+}
+
+// 内容区 = 小画布。尺寸不在这里定，交给 布局() 统一算。
+function 做内容区(列表) {
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.dataset.box = '1';
+  // 按生成时的顺序编号 —— 并排摆的块是从左到右，不是从上看下来
+  for (const 子 of 列表) body.appendChild(渲染块(子));
+  return body;
+}
+
+// 执行顺序依赖块的真实高度（换行会让块变高），
+// 所以只能在 布局() 把尺寸算完、写回 _h/_w 之后再统一刷。
+// 渲染时先摆着，这里统一刷一遍。
+function 刷顺序(列表, 容器el) {
+  if (!列表 || !列表.length) return;
+  const 序 = 树.按行读(列表);
+  for (let i = 0; i < 序.length; i++) {
+    const b = 序[i];
+    const el = 容器el.querySelector(':scope > .blk[data-id="' + b.id + '"]');
+    const 头 = el && el.querySelector(':scope > .head');
+    if (!头) continue;
+
+    let o = 头.querySelector(':scope > .ord');
+    if (!o) {
+      o = document.createElement('span');
+      o.className = 'ord';
+      头.insertBefore(o, 头.firstChild);
+    }
+    o.textContent = i + 1;
+    o.title = '这块在它这一层里第 ' + (i + 1) + ' 个执行';
+  }
+
+  for (const b of 列表) {
+    const el = 容器el.querySelector(':scope > .blk[data-id="' + b.id + '"]');
+    if (!el) continue;
+    const 主体 = el.querySelector(':scope > .body');
+    if (主体) 刷顺序(b.子 || [], 主体);
+    [...el.querySelectorAll(':scope > .branch')].forEach((段el, k) => {
+      const 段 = (b.分支 || [])[k];
+      const bb = 段 && 段el.querySelector(':scope > .body');
+      if (bb) 刷顺序(段.子 || [], bb);
+    });
+  }
+}
+
+
+function 深(el) {
+  let d = 0, p = el;
+  while (p && p !== document.body) { p = p.parentElement; d++; }
+  return d;
+}
+
+// ---------------- 悬停延长 ----------------
+// 子块是绝对定位，不会撑大内容区；内容区变了高，它爹那块也跟着变，
+// 但再往上一层又是绝对定位 —— 断在那儿了。
+// 所以延长必须是「整条祖先链一起加同样一截」，每层都加，谁也不多。
+const 悬停存底 = new Map();
+let 这格多高 = 76;      // 这一格向下让出多少 —— 按「要放进来的那块有多高」算，不是死数字
+
+// 一格刚好放得下这一块，再留点空
+function 一格高度(块el) {
+  const h = 块el ? 块el.getBoundingClientRect().height : 32;
+  return Math.max(40, Math.round(h) + 22);
+}
+
+function 祖先盒(盒) {
+  const 链 = [];
+  let b = 盒;
+  while (b) {
+    链.push(b);
+    const 主 = b.parentElement;                       // .blk
+    if (!主 || !主.classList.contains('blk')) break;
+    b = 主.parentElement;                             // 再外一层 .body
+    if (!b || !b.classList.contains('body')) break;
+  }
+  return 链;
+}
+
+function 延长链(盒, 加) {
+  for (const b of 祖先盒(盒)) {
+    if (加 > 0) {
+      if (!悬停存底.has(b)) 悬停存底.set(b, b.style.minHeight);
+      const 现 = parseFloat(b.style.minHeight) || 0;
+      b.style.minHeight = (现 + 加) + 'px';
+    } else {
+      if (悬停存底.has(b)) {
+        b.style.minHeight = 悬停存底.get(b);
+        悬停存底.delete(b);
+      }
+    }
+  }
+}
+
+// ---------------- 拖动 ----------------
+function 挂拖动(b, el) {
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', e => {
+    if (e.target.classList.contains('ctl')) return;
+    e.stopPropagation();
+    // 一律先观望：走够距离才算拖。
+    // ⚠️ 这里绝不能一按下就调 开始拖 —— 开始拖第一件事是把块从树上摘下来、
+    // 挂到顶层，所以「单击」会当场把内层块从容器里拽出来。单击必须什么都不做。
+    阈值拖(b, el, e);
+  });
+}
+
+function 阈值拖(b, el, 起) {
+  const x0 = 起.clientX, y0 = 起.clientY;
+  // 按在输入框上给大一点阈值，免得想做文字选择（划选几个字）时被当成拖动
+  const 阈 = 起.target.classList.contains('fld') ? 7 : 4;
+  const 收 = () => {
+    document.removeEventListener('pointermove', 探);
+    document.removeEventListener('pointerup', 收);
+  };
+  const 探 = ev => {
+    if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 阈) return;
+    收();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    开始拖(b, el, 起);
+  };
+  document.addEventListener('pointermove', 探);
+  document.addEventListener('pointerup', 收);
+}
+
+function 开始拖(b, el, 起始) {
+  el.classList.add('dragging');
+  const 起始rect = el.getBoundingClientRect();
+  const 抓x = 起始.clientX - 起始rect.left;
+  const 抓y = 起始.clientY - 起始rect.top;
+
+  // 从树上摘下来，但**不重画** —— 一重画，原来的父容器就按剩下的子块重算高度，
+  // 当场缩回去，看起来像「拖着拖着盒子塌了」。
+  const 原位 = 树.找位置(根块们, b.id);
+  if (原位) 原位.列表.splice(原位.下标, 1);
+  根块们.push(b);
+
+  const wr0 = 世界.getBoundingClientRect();
+  b.x = 起始rect.left - wr0.left;
+  b.y = 起始rect.top - wr0.top;
+
+  // 拖的时候把块挂到 body 上用 fixed 跟手，不再放回 #world。
+  // 留在 .stage 里的话，一拖出画布边缘就被 overflow 裁掉 —— 看着像「拖出来只剩半截」。
+  世界.appendChild(el);          // 先脱离原来的父容器
+  document.body.appendChild(el); // 再挂到最外层
+  el.style.position = 'fixed';
+  el.style.left = '0';
+  el.style.top = '0';
+  el.style.margin = '0';
+  el.style.width = Math.round(起始rect.width) + 'px';   // 锁宽，免得换行改了高度
+  el.style.transform = `translate(${起始rect.left}px, ${起始rect.top}px)`;
+  el.style.pointerEvents = 'none';   // 让底下的内容区能被 elementFromPoint 找到
+
+  const 新el = el;
+  let 悬停盒 = null;
+  let 在托盘上 = false;
+
+  const 移 = ev => {
+    const wx = 世界.getBoundingClientRect();
+    b.x = ev.clientX - wx.left - 抓x;
+    b.y = ev.clientY - wx.top - 抓y;
+    // 屏幕上跟手用视口坐标；b.x/b.y 是画布坐标，松手写回树上用那个
+    新el.style.transform = `translate(${ev.clientX - 抓x}px, ${ev.clientY - 抓y}px)`;
+
+    // 鼠标底下是哪个内容区；顺带把它的宿主容器放大一点做提示
+    const 下 = document.elementFromPoint(ev.clientX, ev.clientY);
+    const 到托盘了 = !!(下 && 下.closest && 下.closest('.palette'));
+    if (到托盘了 !== 在托盘上) {
+      在托盘上 = 到托盘了;
+      调.classList.toggle('回收', 在托盘上);
+    }
+    let 盒 = 下 && 下.closest ? 下.closest('[data-box]') : null;
+    // 落在容器的标题行、边框上也算 —— 不然只有正对着虚线框里面才放得进去，很挑
+    if (!盒 && 下 && 下.closest) {
+      const 主 = 下.closest('.blk.容器');
+      if (主) 盒 = 主.querySelector(':scope > .body');
+    }
+
+    // 自己或自己的子孙：不能塞，就不给「能放这儿」的暗示
+    if (盒) {
+      const 宿主el = 盒.closest('.blk');
+      const 宿主id = 宿主el ? Number(宿主el.dataset.id) : null;
+      if (!宿主id || 树.找位置([b], 宿主id)) 盒 = null;
+    }
+
+    if (盒 !== 悬停盒) {
+      if (悬停盒) {
+        悬停盒.classList.remove('over');
+        const 旧主 = 悬停盒.closest('.blk');
+        if (旧主) 旧主.classList.remove('目标');
+        延长链(悬停盒, -这格多高);
+      }
+      悬停盒 = 盒;
+      if (悬停盒) {
+        悬停盒.classList.add('over');
+        const 新主 = 悬停盒.closest('.blk');
+        if (新主) 新主.classList.add('目标');
+        这格多高 = 一格高度(新el);
+        延长链(悬停盒, 这格多高);
+      }
+    }
+  };
+
+  const 停 = () => {
+    document.removeEventListener('pointermove', 移);
+    document.removeEventListener('pointerup', 停);
+    调.classList.remove('回收');
+    if (悬停盒) {
+      悬停盒.classList.remove('over');
+      const 主 = 悬停盒.closest('.blk');
+      if (主) 主.classList.remove('目标');
+      延长链(悬停盒, -这格多高);
+    }
+
+    let 收下了 = false;
+    if (悬停盒) {
+      const 宿主el = 悬停盒.closest('.blk');
+      const 宿主id = 宿主el ? Number(宿主el.dataset.id) : null;
+      // 不能塞进自己身体里
+      if (宿主id && !树.找位置([b], 宿主id)) {
+        const 宿主位 = 树.找位置(根块们, 宿主id);
+        if (宿主位) {
+          // b.x/b.y 已经是世界坐标，直接换算成相对这个内容区
+          const 盒rect = 悬停盒.getBoundingClientRect();
+          const 世界rect = 世界.getBoundingClientRect();
+          b.x = Math.max(4, b.x - (盒rect.left - 世界rect.left));
+          b.y = Math.max(4, b.y - (盒rect.top - 世界rect.top));
+
+          根块们 = 根块们.filter(x => x !== b);
+          // 找这个盒属于哪个列表（子 or 某分支）
+          收进(宿主位.块, b);
+          收下了 = true;
+        }
+      }
+    }
+
+    if (!收下了) {
+      根块们 = 根块们.filter(x => x !== b);
+      if (!在托盘上) {                   // 拖回托盘 = 扔掉（开始拖时就已从树里摘下来了）
+        b.x = Math.max(0, b.x);
+        b.y = Math.max(0, b.y);
+        根块们.push(b);
+      }
+    }
+    重画();
+  };
+
+  document.addEventListener('pointermove', 移);
+  document.addEventListener('pointerup', 停);
+}
+
+// 把一个块塞进宿主（判断是哪一层的盒子）
+function 收进(宿主, b) {
+  宿主.子.push(b);
+}
+
+// 松手时把重叠的块往下推 —— 这样「插到中间」不用自己挪位置，
+// 放下去后面的一串自动让开。没有重叠的块一个都不动，自由摆放不受影响。
+// 同一行的块（垂直方向上有重叠）当成一组，组内不互相推。
+function 清全部重叠() {
+  let 动过 = false;
+  (function 走(列表) {
+    if (!列表 || !列表.length) return;
+    if (清重叠(列表)) 动过 = true;
+    for (const b of 列表) {
+      走(b.子);
+      for (const 段 of b.分支 || []) 走(段.子);
+    }
+  })(根块们);
+  return 动过;
+}
+
+function 清重叠(列表) {
+  let 动过 = false;
+  if (!列表 || 列表.length < 2) return false;
+  const 已放 = [];
+  for (const b of [...列表].sort((x, y) => (x.y || 0) - (y.y || 0))) {
+    let 顶 = b.y || 0;
+    const 高 = b._h || 32, 宽 = b._w || 160;
+    // 前面的块如果跟它在两个方向上都重叠，就把它顶下去（可以连着顶好几次）
+    for (let 再 = true; 再;) {
+      再 = false;
+      for (const a of 已放) {
+        const a顶 = a.y || 0, a底 = a顶 + (a._h || 32);
+        const a左 = a.x || 0, a右 = a左 + (a._w || 160);
+        const 竖撞 = 顶 < a底 && a顶 < 顶 + 高;
+        const 横撞 = (b.x || 0) < a右 && a左 < (b.x || 0) + 宽;
+        if (竖撞 && 横撞) { 顶 = a底 + 8; 再 = true; }
+      }
+    }
+    if (顶 !== (b.y || 0)) 动过 = true;
+    b.y = 顶;
+    已放.push(b);
+  }
+  return 动过;
+}
+
+// ---------------- 从托盘拖到画布 ----------------
+// 按住托盘上的块，直接在鼠标位置造一个**真的块**，然后走画布上那套拖动。
+// 这样：
+//   · 拖的时候看到的就是最终那个块，不是一个小标签
+//   · 落进哪个框、拖回托盘扔掉，全都复用现成逻辑，不用另写一套"放下"
+//   · 只点一下不移动，块就落在原地（等于原来那种随手加一块）
+const 落点偏移x = 28;
+const 落点偏移y = 14;
+
+function 挂托盘(c, 类型) {
+  c.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    const 起 = { x: e.clientX, y: e.clientY };
+    let 已建 = false;
+
+    // 在 (cx,cy) 造一个真块 —— 位置要让鼠标落在块的左上角往里一点，
+    // 否则块会整块甩到鼠标右下方去
+    const 造在 = (cx, cy) => {
+      已建 = true;
+      const 块 = 建(类型, 0, 0);
+      根块们.push(块);
+      重画();
+      // 先让它渲染出来，再按真实位置校正一次 ——
+      // 直接拿 cx - world.left 算会有几十像素的偏差（画布边距、块的边框都算进去了）
+      const el0 = 世界.querySelector(`.blk[data-id="${块.id}"]`);
+      if (el0) {
+        const r0 = el0.getBoundingClientRect();
+        块.x = 块.x + (cx - 落点偏移x) - r0.left;
+        块.y = 块.y + (cy - 落点偏移y) - r0.top;
+        重画();
+      }
+      return { 块, el: 世界.querySelector(`.blk[data-id="${块.id}"]`) };
+    };
+
+    const 收 = () => {
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+
+    const 移 = ev => {
+      if (已建) return;
+      if (Math.abs(ev.clientX - 起.x) + Math.abs(ev.clientY - 起.y) < 5) return;
+      收();                                   // 交给 开始拖 自己接管
+      const { 块, el } = 造在(ev.clientX, ev.clientY);
+      if (el) 开始拖(块, el, ev);
+    };
+
+    const 停 = () => {
+      收();
+      if (已建) return;
+      // 没动 = 点一下。丢到画布看得见的地方，不要留在托盘底下
+      const sr = 舞台.getBoundingClientRect();
+      造在(sr.left + sr.width * 0.35, sr.top + sr.height * 0.32);
+    };
+
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+}
+
+// ---------------- 侧栏宽度可拖 ----------------
+(function 挂侧栏拖宽() {
+  const 栏 = document.querySelector('.palette');
+  const 把 = document.createElement('div');
+  把.className = 'palette-grip';
+  栏.appendChild(把);
+  把.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const 起x = e.clientX, 起宽 = 栏.getBoundingClientRect().width;
+    把.classList.add('按着');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const 移 = ev => {
+      const w = Math.max(120, Math.min(460, 起宽 + ev.clientX - 起x));
+      栏.style.width = w + 'px';
+    };
+    const 停 = () => {
+      把.classList.remove('按着');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+})();
+
+// ---------------- 调色板 ----------------
+const 调 = document.getElementById('palette');
+const 按组 = window.Blocks.按组归类();
+
+for (const [组名, 类型们] of Object.entries(按组)) {
+  if (!类型们.length) continue;
+  const 节 = document.createElement('div');
+  节.className = 'grp-sec';
+
+  const h = document.createElement('h2');
+  h.className = 'grp';
+  const 箭 = document.createElement('span');
+  箭.className = 'grp-arrow';
+  箭.textContent = '▾';
+  h.appendChild(箭);
+  h.appendChild(document.createTextNode(组名));
+  h.addEventListener('click', () => 节.classList.toggle('collapsed'));
+
+  const 箱 = document.createElement('div');
+  箱.className = 'chips';
+
+  类型们.forEach(类型 => {
+    const c = document.createElement('div');
+    c.className = 'chip';
+    const 中 = document.createElement('span');
+    中.textContent = 类型;
+    c.appendChild(中);
+    c.title = 类型 + (块定义[类型].英文 ? '  ' + 块定义[类型].英文 : '');
+    if (块定义[类型].英文) {
+      const en = document.createElement('span');
+      en.className = 'en';
+      en.textContent = 块定义[类型].英文;
+      c.appendChild(en);
+    }
+    挂托盘(c, 类型);
+    箱.appendChild(c);
+  });
+
+  节.appendChild(h);
+  节.appendChild(箱);
+  调.appendChild(节);
+}
+
+// 画布自动变大：块拖到边上时不至于被裁掉
+function 自动扩画布() {
+  let 右 = 2400, 下 = 1600;
+  for (const b of 根块们) {
+    const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+    if (!el) continue;
+    右 = Math.max(右, b.x + el.offsetWidth + 160);
+    下 = Math.max(下, b.y + el.offsetHeight + 160);
+  }
+  世界.style.width = 右 + 'px';
+  世界.style.height = 下 + 'px';
+}
+
+// ---------------- 存盘 / 撤销 ----------------
+// 一个「工程」= 一张画布（整棵树，含每个块的坐标和字段）。
+// 工程表存在 localStorage 里，打开时全部读回来；顶栏的标签页对应它。
+const 存档键 = 'zh-editor-工程表';
+let 工程表 = {};          // 名字 → { 块们, 改 }
+let 当前工程 = '';
+let 历史 = [], 历史位 = -1, 正在撤销 = false;
+
+// 布局缓存（_h/_w）不进快照 —— 它们只是渲染产物，混进去会让「看起来没变」也算一次改动
+function 快照() {
+  return JSON.stringify(根块们, (k, v) => (k === '_h' || k === '_w') ? undefined : v);
+}
+
+function 记历史() {
+  if (正在撤销) return;
+  const 现 = 快照();
+  if (历史[历史位] === 现) return;
+  历史 = 历史.slice(0, 历史位 + 1);
+  历史.push(现);
+  if (历史.length > 120) { 历史.shift(); }
+  历史位 = 历史.length - 1;
+}
+
+function 存盘() {
+  try {
+    if (!当前工程) return;
+    工程表[当前工程] = { ...(工程表[当前工程] || {}), 块们: JSON.parse(快照()), 改: Date.now() };
+    localStorage.setItem(存档键, JSON.stringify(工程表));
+  } catch (e) { /* 存不了就算了，不能因此让编辑器挂掉 */ }
+}
+
+function 读盘() {
+  try {
+    const t = localStorage.getItem(存档键);
+    if (!t) return false;
+    const 数据 = JSON.parse(t);
+    if (!数据 || typeof 数据 !== 'object' || Array.isArray(数据)) return false;
+    工程表 = 数据;
+    const 名字 = Object.keys(工程表);
+    if (!名字.length) return false;
+    当前工程 = 名字[0];
+    根块们 = 工程表[当前工程].块们 || [];
+    return true;
+  } catch (e) { return false; }
+}
+
+// ---------- 多工程 ----------
+function 切到工程(名) {
+  if (!工程表[名]) return;
+  存盘();                       // 先把当前这个存一下
+  当前工程 = 名;
+  根块们 = 工程表[名].块们 || [];
+  历史 = []; 历史位 = -1;      // 历史不跨工程，不然撤销会串到别的文件
+  关说明(); 关选项();
+  重画();
+  画标签();
+  刷新本份标签();
+}
+
+function 新工程() {
+  let 名 = '未命名';
+  let i = 2;
+  while (工程表[名]) 名 = '未命名' + (i++);
+  工程表[名] = { 块们: [], 改: Date.now() };
+  切到工程(名);
+}
+
+function 删工程(名) {
+  if (!工程表[名]) return;
+  if (Object.keys(工程表).length <= 1) { alert('至少留一个工程'); return; }
+  if (!confirm('删掉「' + 名 + '」？里面的块就没了。')) return;
+  delete 工程表[名];
+  const 剩下 = Object.keys(工程表);
+  当前工程 = 剩下[0];
+  根块们 = 工程表[当前工程].块们 || [];
+  历史 = []; 历史位 = -1;
+  重画();
+  画标签();
+  存盘();
+}
+
+function 改名工程(旧) {
+  const 新 = prompt('改成什么名字？', 旧);
+  if (!新 || 新 === 旧) return;
+  const 名 = 新.trim();
+  if (!名 || 工程表[名]) { alert('这个名字已经有了'); return; }
+  工程表[名] = 工程表[旧];
+  delete 工程表[旧];
+  if (当前工程 === 旧) 当前工程 = 名;
+  画标签();
+  存盘();
+}
+
+function 画标签() {
+  const 条 = document.getElementById('tabs');
+  if (!条) return;
+  条.textContent = '';
+  for (const 名 of Object.keys(工程表)) {
+    const t = document.createElement('div');
+    t.className = 'tab' + (名 === 当前工程 ? ' active' : '');
+    t.title = '双击改名';
+    const 字 = document.createElement('span');
+    字.textContent = 名;
+    t.appendChild(字);
+    const x = document.createElement('span');
+    x.className = 'x';
+    x.textContent = '✕';
+    x.title = '删掉这个工程';
+    x.addEventListener('pointerdown', e => e.stopPropagation());
+    x.addEventListener('click', e => { e.stopPropagation(); 删工程(名); });
+    t.appendChild(x);
+    t.addEventListener('click', () => 切到工程(名));
+    t.addEventListener('dblclick', () => 改名工程(名));
+    条.appendChild(t);
+  }
+  const 加 = document.createElement('div');
+  加.className = 'tab 新';
+  加.textContent = '＋';
+  加.title = '新建一个工程';
+  加.addEventListener('click', 新工程);
+  条.appendChild(加);
+}
+
+function 撤销() {
+  if (历史位 <= 0) return false;
+  历史位--;
+  正在撤销 = true;
+  try { 根块们 = JSON.parse(历史[历史位]); 重画(); } finally { 正在撤销 = false; }
+  return true;
+}
+
+function 重做() {
+  if (历史位 >= 历史.length - 1) return false;
+  历史位++;
+  正在撤销 = true;
+  try { 根块们 = JSON.parse(历史[历史位]); 重画(); } finally { 正在撤销 = false; }
+  return true;
+}
+
+// ---------------- 重画 ----------------
+let 画序 = 0;
+function 重画() {
+  const 我 = ++画序;
+  悬停存底.clear();
+  // 拖动中的块挂在 document.body 上（见 开始拖），所以清理要扫整个文档，
+  // 只扫 #world 会把那些副本留在页面里，越拖越多。
+  [...document.querySelectorAll('.blk')].forEach(e => e.remove());
+  const 提示 = document.getElementById('hintEmpty');
+  if (提示) 提示.style.display = 根块们.length ? 'none' : 'block';
+
+  for (const b of 根块们) 世界.appendChild(渲染块(b));
+  标孤岛();
+  布局(根块们);
+  // 尺寸定了才知道谁真的压住谁 —— 这一步必须在 布局() 之后
+  if (清全部重叠()) 布局(根块们);
+  记历史();
+  存盘();
+  自动扩画布();
+  输出();
+
+  // 布局只量「叶子块多大、头多高」这两样，而这俩要等字排完才准。
+  // 量它们不会反过来影响容器，所以再算一遍是安全的 —— 不会越算越大。
+  const 再算 = () => { if (我 !== 画序) return; 布局(根块们); 自动扩画布(); };
+  requestAnimationFrame(再算);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(再算);
+}
+
+// 孤岛：放在画布最上层、又不是「类」的块。
+// 它们生成出来会掉在类外面（Unity 编译不过），所以标红提醒。
+const 可顶层 = new Set(['类', '手写一行']);
+function 标孤岛() {
+  let 数 = 0;
+  for (const b of 根块们) {
+    const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+    if (!el) continue;
+    const 孤 = !可顶层.has(b.类型);
+    el.classList.toggle('孤岛', 孤);
+    if (孤) 数++;
+  }
+  let 条 = document.getElementById('孤岛提示');
+  if (!条) {
+    条 = document.createElement('div');
+    条.id = '孤岛提示';
+    世界.appendChild(条);
+  }
+  条.className = 数 ? '孤岛提示' : '孤岛提示 hidden';
+  条.textContent = 数 + ' 个块没进类，生成出来会掉在类外面';
+}
+
+// 编译不过的三种常见原因，先在这儿挡一道 —— 比生成出坏代码再回 Unity 看红字强
+function 查问题() {
+  const 问题 = [];
+
+  // ① 顶层两个类同名
+  const 类名 = 根块们.filter(b => b.类型 === '类')
+    .map(b => String(b.字段.名 || '').trim()).filter(Boolean);
+  const 重类 = [...new Set(类名.filter((n, i) => 类名.indexOf(n) !== i))];
+  if (重类.length) 问题.push('有两个类都叫「' + 重类.join('」「') + '」');
+
+  // ② 同一层里同一个变量定义了两遍（CS0128）
+  // 注意：每层各自判重，所以要把「各层的结论」收集起来，不能只用最外层的返回值
+  const 重变 = [];
+  const 查层 = (列表) => {
+    if (!列表 || !列表.length) return;
+    const 名 = [];
+    for (const b of 列表) {
+      if (b.类型 === '定义变量') {
+        const n = String(b.字段.名 || '').trim();
+        if (n) 名.push(n);
+      }
+    }
+    const 重 = [...new Set(名.filter((n, i) => 名.indexOf(n) !== i))];
+    for (const n of 重) 重变.push(n);
+    for (const b of 列表) {
+      查层(b.子);
+      for (const 段 of b.分支 || []) 查层(段.子);
+    }
+  };
+  查层(根块们);
+  if (重变.length) 问题.push('同一层里「' + 重变.join('」「') + '」各定义了两遍');
+
+  // ③ 要输出的东西没加引号 —— 生成 Debug.Log(信息) 就编译不过
+  const 裸文字 = [];
+  (function 找(列表) {
+    for (const b of 列表 || []) {
+      if (b.类型 === '打印' || b.类型 === '警告' || b.类型 === '报错') {
+        const v = String(b.字段.值 || '').trim();
+        if (v && !/^["'].*["']$/.test(v) && /[一-龥]/.test(v)) 裸文字.push(v);
+      }
+      找(b.子);
+      for (const 段 of b.分支 || []) 找(段.子);
+    }
+  })(根块们);
+  if (裸文字.length) 问题.push('「' + 裸文字[0] + '」是文字，要用双引号包起来');
+
+  // ④ 跳出 / 继续 得在循环里；⑤ 返回 要和方法的返回类型对上
+  const 找返回 = (列表) => {
+    for (const b of 列表 || []) {
+      if (b.类型 === '返回') return b;
+      const r = 找返回(b.子) || (b.分支 || []).map(段 => 找返回(段.子)).find(Boolean);
+      if (r) return r;
+    }
+    return null;
+  };
+  const 走 = (列表, 在循环里) => {
+    for (const b of 列表 || []) {
+      if ((b.类型 === '跳出' || b.类型 === '继续') && !在循环里) {
+        问题.push('「' + b.类型 + '」只能放在循环里面，放外面编译不过');
+      }
+      if (b.类型 === '方法') {
+        const 名 = String(b.字段.名 || '未命名');
+        const 有类型 = b.字段.返回什么 && b.字段.返回什么 !== '无返回';
+        const 返 = 找返回(b.子);
+        if (有类型 && !返) 问题.push('方法「' + 名 + '」说了要返回，里面却没有「返回」');
+        if (!有类型 && 返 && String(返.字段.值 || '').trim() && String(返.字段.值 || '').trim() !== '0') {
+          问题.push('方法「' + 名 + '」没写返回类型，但里面「返回」了值 —— 去块上选一下「交回什么东西」');
+        }
+      }
+      const 是循环 = b.类型 === '重复' || b.类型 === '只要' || b.类型 === '遍历';
+      走(b.子, 在循环里 || 是循环);
+      for (const 段 of b.分支 || []) 走(段.子, 在循环里 || 是循环);
+    }
+  };
+  走(根块们, false);
+
+  return 问题;
+}
+
+let 当前代码 = '';
+
+function 输出() {
+  let 代码;
+  try {
+    代码 = 树.生成CSharp(根块们) || '// 左边点块，右边出代码';
+  } catch (e) {
+    代码 = '// 生成失败：' + e.message;
+  }
+  当前代码 = 代码;
+
+  const 行们 = 代码.split(String.fromCharCode(10));
+  const 片 = document.createDocumentFragment();
+  行们.forEach((文, i) => {
+    const 行 = document.createElement('div');
+    行.className = 'ln';
+    行.dataset.行 = i + 1;
+    const 号 = document.createElement('span');
+    号.className = 'no';
+    号.textContent = i + 1;
+    const 字 = document.createElement('span');
+    字.className = 'tx';
+    字.textContent = 文 || ' ';
+    行.appendChild(号);
+    行.appendChild(字);
+    片.appendChild(行);
+  });
+  out.textContent = '';
+  out.appendChild(片);
+  标错行();
+
+  const 问题 = 查问题();
+  if (问题.length) {
+    警告.textContent = '⚠ ' + 问题.join('　·　');
+    警告.classList.remove('hidden');
+  } else {
+    警告.classList.add('hidden');
+  }
+
+  排编译检查();
+}
+
+// ---------------- 真编译检查（像 VS 那样报） ----------------
+let 编译结果 = [];        // [{严重, 行, 列, 码, 说}]
+let 检查定时 = 0;
+
+function 排编译检查() {
+  const 条 = document.getElementById('errCount');
+  if (!有壳()) {
+    if (条) { 条.textContent = '（网页版不做编译检查，用 exe 才有）'; 条.className = 'errcount'; }
+    return;
+  }
+  clearTimeout(检查定时);
+  检查定时 = setTimeout(() => {
+    window.chrome.webview.postMessage({ 命令: '编译检查', 代码: 当前代码 });
+  }, 700);
+}
+
+function 标错行() {
+  const 行们 = out.querySelectorAll('.ln');
+  行们.forEach(l => l.classList.remove('bad', 'warn2'));
+  let 错数 = 0, 警数 = 0;
+  for (const e of 编译结果) {
+    const l = out.querySelector('.ln[data-行="' + e.行 + '"]');
+    if (!l) continue;
+    if (e.严重 === '错误') { l.classList.add('bad'); 错数++; }
+    else { l.classList.add('warn2'); 警数++; }
+  }
+  const 条 = document.getElementById('errCount');
+  if (条) {
+    条.className = 'errcount' + (错数 ? ' 有错' : '');
+    条.textContent = 错数 ? '✕ ' + 错数 + ' 个错误' + (警数 ? '　⚠ ' + 警数 : '')
+                        : (警数 ? '⚠ ' + 警数 + ' 个警告' : '✓ 编译通过');
+  }
+
+  const 板 = document.getElementById('errs');
+  板.textContent = '';
+  if (!编译结果.length) { 板.classList.add('hidden'); return; }
+  板.classList.remove('hidden');
+  for (const e of 编译结果) {
+    const 项 = document.createElement('div');
+    项.className = 'err' + (e.严重 === '警告' ? ' 警' : '');
+    const 码 = document.createElement('span'); 码.className = '码'; 码.textContent = e.码;
+    const 位 = document.createElement('span'); 位.className = '位'; 位.textContent = e.行 + ':' + e.列;
+    const 说 = document.createElement('span'); 说.className = '说'; 说.textContent = e.说;
+    项.appendChild(码); 项.appendChild(位); 项.appendChild(说);
+    项.addEventListener('click', () => 跳行(e.行));
+    板.appendChild(项);
+  }
+}
+
+function 跳行(n) {
+  const l = out.querySelector('.ln[data-行="' + n + '"]');
+  if (!l) return;
+  l.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  l.classList.add('闪');
+  setTimeout(() => l.classList.remove('闪'), 900);
+}
+
+document.getElementById('copyBtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(当前代码);
+    const b = document.getElementById('copyBtn');
+    const 旧 = b.textContent; b.textContent = '已复制 ✓';
+    setTimeout(() => b.textContent = 旧, 1200);
+  } catch { alert('复制失败，手动选中右侧代码'); }
+};
+document.getElementById('clearBtn').onclick = () => { 根块们 = []; 重画(); };  // 只管当前这张画布
+
+// ---------------- 存到 Unity ----------------
+// 整份覆盖写，不是追加 —— 同一张画布改十次，文件里永远只有这一份。
+// 只有 exe 里才有写盘通道；网页版退回成「下载文件」。
+function 有壳() {
+  return !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage);
+}
+
+function 找类名() {
+  const 出处 = 树.生成CSharp(根块们) || '';
+  const m = 出处.match(/public class\s+(\S+)/);
+  return m ? m[1] : '';
+}
+
+function 存到Unity() {
+  const 代码 = 当前代码 || '';
+  if (!代码.trim() || 代码.startsWith('//')) { alert('画布还是空的，没什么可存'); return; }
+  const 名 = (找类名() || 当前工程 || '未命名') + '.cs';
+
+  if (有壳()) {
+    const 上一次 = (工程表[当前工程] && 工程表[当前工程].存到) || '';
+    window.chrome.webview.postMessage({ 命令: '存到Unity', 文件名: 名, 内容: 代码, 上次路径: 上一次 });
+    return;
+  }
+  // 网页版：下载出去，自己拖进 Unity
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([代码], { type: 'text/plain;charset=utf-8' }));
+  a.download = 名;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+document.getElementById('saveUnityBtn').onclick = 存到Unity;
+
+// Unity 目录显示在这 —— 不点「存到 Unity」也能看到现在存去哪儿，点一下能换
+function 刷新目录标签(路) {
+  const el = document.getElementById('unityDir');
+  if (!el) return;
+  el.dataset.路径 = 路 || '';
+  el.classList.toggle('设过', !!路);
+  el.textContent = 路 ? 'Unity 目录：' + 路 : 'Unity 目录：未设（点这里选）';
+  el.title = 路 ? 路 + '（点一下换一个）' : '点一下选 Unity 项目的 Assets 文件夹';
+}
+
+function 刷新本份标签() {
+  const el = document.getElementById('curFile');
+  if (!el) return;
+  const 项 = 工程表[当前工程] || {};
+  const 路 = 项.存到 || '';
+  if (!路) { el.textContent = '本份：还没存过'; el.title = '点「存到 Unity」之后这里会显示它存到哪个文件'; return; }
+  el.textContent = '本份：' + (项.相对 || 路);
+  el.title = '完整路径：' + 路;
+}
+
+document.getElementById('engineDir').onclick = () => {
+  if (!有壳()) { alert('网页版做不了编译检查'); return; }
+  window.chrome.webview.postMessage({ 命令: '选引擎目录' });
+};
+
+function 刷新引擎标签(路) {
+  const el = document.getElementById('engineDir');
+  if (!el) return;
+  el.classList.toggle('设过', !!路);
+  const 斜 = String.fromCharCode(92);
+  if (路) {
+    const 段 = 路.split(斜);
+    el.textContent = '引擎：' + 段.slice(-4).join(斜);
+  } else {
+    el.textContent = '引擎：没找到（点这里选）';
+  }
+  el.title = 路 || '点一下选 Unity 安装目录里的 Editor / Data / Managed';
+}
+
+document.getElementById('unityDir').onclick = () => {
+  if (!有壳()) { alert('网页版写不了磁盘 —— 用 exe 才能直接存到 Unity'); return; }
+  window.chrome.webview.postMessage({ 命令: '换目录' });
+};
+
+if (有壳()) window.chrome.webview.postMessage({ 命令: '问目录' });
+
+if (有壳()) {
+  window.chrome.webview.addEventListener('message', e => {
+    const d = e.data;
+    if (!d || !d.命令) return;
+    const 按钮 = document.getElementById('saveUnityBtn');
+    if (d.命令 === '存好了') {
+      if (工程表[当前工程]) {
+        工程表[当前工程].存到 = d.路径;
+        工程表[当前工程].相对 = d.相对 || '';
+        存盘();
+      }
+      刷新本份标签();
+      const 旧 = 按钮.textContent;
+      按钮.textContent = '已存 ' + d.文件名;
+      按钮.title = d.路径 + (d.说明 ? '（' + d.说明 + '）' : '');
+      setTimeout(() => { 按钮.textContent = 旧; }, 1800);
+    } else if (d.命令 === '编译结果') {
+      编译结果 = Array.isArray(d.列表) ? d.列表 : [];
+      const 条 = document.getElementById('errCount');
+      if (条) 条.title = d.诊断 || '';
+      刷新引擎标签(d.引擎);
+      标错行();
+    } else if (d.命令 === '引擎目录') {
+      刷新引擎标签(d.路径);
+    } else if (d.命令 === '目录') {
+      刷新目录标签(d.路径 || '');
+    } else if (d.命令 === '出错') {
+      alert('没存进去：' + d.说);
+    }
+  });
+}
+
+document.getElementById('undoBtn').onclick = () => 撤销();
+document.getElementById('redoBtn').onclick = () => 重做();
+
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;   // 输入框里的撤销留给浏览器
+  if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); e.shiftKey ? 重做() : 撤销(); }
+  else if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); 重做(); }
+});
+
+// 有存档就接着上次；没有就建一个空的
+if (!读盘()) {
+  当前工程 = '未命名';
+  工程表[当前工程] = { 块们: [], 改: Date.now() };
+  根块们 = [];
+}
+画标签();
+刷新本份标签();
+重画();
+</script>
+</body>
+</html>

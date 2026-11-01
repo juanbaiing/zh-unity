@@ -1,0 +1,3120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中文套式 · 自由画布</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --line:#252b36; --text:#d7dce4; --dim:#7b8494;
+    --cn:#7ee787; --cs:#79c0ff; --bad:#ff6b6b;
+    --kcontain:#a855f7; --kstmt:#22c55e; --kdata:#3b82f6; --kcond:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:#12161d}
+  *::-webkit-scrollbar-thumb{background:#2b3341;border-radius:5px;border:2px solid #12161d}
+  html,body{height:100%;margin:0;scrollbar-color:#2b3341 #12161d;scrollbar-width:thin}
+  body{background:var(--bg);color:var(--text);font-family:"Cascadia Code","Consolas",monospace;
+    font-size:12.5px;display:flex;flex-direction:column;overflow:hidden}
+
+  header{padding:7px 12px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:10px;flex:none}
+  header h1{font-size:13px;margin:0}
+  .hint{color:var(--dim);font-size:11.5px}
+  .spacer{flex:1}
+  .dirchip{font-size:11px;color:var(--dim);padding:3px 9px;border-radius:4px;
+    border:1px solid var(--line);cursor:pointer;max-width:300px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
+  .dirchip:hover{color:var(--cn);border-color:var(--cn)}
+  .dirchip.设过{color:#8fae9a}
+  .dirchip.文件{max-width:360px}
+  button{background:#1f2632;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:4px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  button:hover{background:#2a3342}
+
+  /* 顶栏的标签页：一个标签 = 一张画布 = 一个 Unity 脚本 */
+  .tabs{display:flex;flex:none;background:#12161d;border-bottom:1px solid var(--line);
+    overflow-x:auto;padding:0 4px}
+  .tabs::-webkit-scrollbar{height:4px}
+  .tab{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;
+    color:var(--dim);cursor:pointer;white-space:nowrap;border-top:2px solid transparent;
+    background:#161a21;user-select:none}
+  .tab:hover{color:var(--text);background:#1a2028}
+  .tab.active{background:var(--bg);color:var(--text);border-top-color:var(--cn)}
+  .tab .x{opacity:0;font-size:10px;padding:0 2px}
+  .tab:hover .x{opacity:.6}
+  .tab .x:hover{opacity:1;color:var(--bad)}
+  .tab.新{color:#5a6478;font-size:14px;padding:3px 12px}
+  .tab.新:hover{color:var(--cn)}
+
+  main{flex:1;display:flex;min-height:0}
+
+  .palette{width:170px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    padding:8px 7px;overflow:auto;position:relative}
+  /* 用 grid + auto-fill：栏拖宽了列数自己变，不用改一个数字 */
+  #palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));
+    gap:12px 8px;align-items:start}
+  .grp-sec{min-width:0}
+  .chips{display:flex;flex-direction:column;gap:3px}
+  .palette h2{font-size:10.5px;color:var(--dim);margin:0 0 6px}
+  .palette h2.grp{font-size:10px;color:#5a6478;margin:8px 0 4px;padding-bottom:3px;
+    border-bottom:1px solid #232a36;letter-spacing:1px;cursor:pointer;
+    display:flex;align-items:center;gap:4px;user-select:none}
+  .palette h2.grp:hover{color:var(--cn)}
+  .grp-arrow{font-size:9px;transition:transform .12s;display:inline-block}
+  .grp-sec.collapsed .grp-arrow{transform:rotate(-90deg)}
+  .grp-sec.collapsed .chips{display:none}
+
+  .chip{padding:4px 8px;border-radius:5px;cursor:grab;user-select:none;
+    border:1px dashed #3a4354;background:#1a1f28;font-size:11.5px;
+    display:flex;align-items:baseline;gap:5px;white-space:nowrap;
+    overflow:hidden;min-width:0}
+  .chip:hover{border-color:var(--cn);color:var(--cn)}
+  /* 中文名不许被挤掉；英文太长就出省略号，鼠标停上去看全名 */
+  .chip > span:first-child{flex:none}
+  .en{font-size:10px;color:#4a5568;font-style:italic;user-select:none;
+    flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+  .stage{flex:1;overflow:auto;min-width:0}
+  #world{position:relative;width:2400px;height:1600px;
+    background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
+  #hintEmpty{position:absolute;left:40px;top:40px;color:#4a5568;font-size:12px}
+
+  /* 所有块都是绝对定位 —— 画布上自由摆，容器里也自由摆 */
+  .blk{position:absolute;background:#171c25;border:1px solid #2b3341;
+    border-left:3px solid var(--kstmt);border-radius:5px;
+    min-width:150px;box-shadow:0 2px 6px #0006;z-index:2}
+  .blk[data-t="类"],.blk[data-t="方法"],.blk[data-t="构造函数"]{border-left-color:var(--kcontain)}
+  .blk[data-t="设若"],.blk[data-t="否则若"],.blk[data-t="否则"],
+  .blk[data-t="重复"],.blk[data-t="只要"],.blk[data-t="遍历"],
+  .blk[data-t="多分支"],.blk[data-t="遇"],.blk[data-t="其他"],
+  .blk[data-t="尝试"],.blk[data-t="捕获"],.blk[data-t="读按键"]{border-left-color:var(--kcond)}
+  .blk[data-t="字段"],.blk[data-t="属性"],.blk[data-t="数组"],.blk[data-t="新建列表"]{border-left-color:var(--kdata)}
+  .blk.容器{background:#141922}
+  .blk.dragging{opacity:.85;z-index:999}
+  .blk.孤岛{border-color:var(--bad);border-left-color:var(--bad)}
+
+  .head{display:flex;align-items:center;gap:5px;padding:5px 8px;flex-wrap:wrap;
+    cursor:move;user-select:none}
+  .ord{font-size:10px;color:#5a6478;min-width:14px;text-align:center;
+    border-right:1px solid #2b3341;padding-right:4px;user-select:none}
+  .kind{font-size:10px;color:var(--dim);background:#1f2632;padding:0 5px;border-radius:3px}
+  .fld{color:var(--cn);border:1px solid transparent;border-radius:3px;padding:0 5px;color-scheme:dark;
+    outline:none;background:#12161d;font-size:11.5px;font-family:inherit;
+    height:20px;line-height:18px;vertical-align:middle;cursor:text}
+  .fld:focus{border-color:var(--cn);background:#0d1117}
+  .fld::placeholder{color:#4a5568}
+  .ctl{color:#6b7688;cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
+  .ctl:hover{color:var(--cn)}
+  .ctl.del:hover{color:var(--bad)}
+  .ctl.选{font-size:10px;padding:0 4px;color:#6b7688}
+  .ctl.选:hover{color:var(--cn)}
+
+  .选项层{position:fixed;z-index:9998;min-width:130px;max-width:340px;max-height:280px;
+    overflow:auto;padding:4px;background:#1a2029;border:1px solid #2f3a49;
+    border-radius:6px;box-shadow:0 10px 30px #000b}
+  .选项行{padding:4px 9px;border-radius:4px;color:#c3ccd8;font-size:11.5px;
+    cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .选项行:hover{background:#243040;color:var(--cn)}
+  .选项行.选中{color:var(--cn);background:#1c2a22}
+
+  .ctl.问{font-weight:bold;font-size:12px;padding:0 5px}
+  .ctl.问:hover{color:var(--cn)}
+
+  .说明卡{position:fixed;z-index:9999;max-width:330px;padding:10px 13px;
+    background:#1a2029;border:1px solid #2f3a49;border-left:3px solid var(--cn);
+    border-radius:7px;box-shadow:0 10px 30px #000b;
+    font-size:12px;line-height:1.7;color:#c3ccd8;white-space:normal}
+  .说明头{margin-bottom:5px}
+  .说明头 b{color:var(--cn);font-size:13px;margin-right:7px}
+  .说明头 .en{font-size:10.5px;color:#5a6478;font-style:italic}
+  .说明文{white-space:pre-wrap}
+
+  /* 容器的内容区：一块小画布，里面的块照样绝对定位、随便摆 */
+  .body{position:relative;margin:0 8px 10px 16px;
+    border:1px dashed #2b3341;border-radius:5px;
+    min-width:var(--w, 120px);
+    min-height:var(--h, 56px);
+    background:#10151c}
+  /* 不要给 min-width/min-height 加 transition。
+     尺寸是「算出来写死」的，过渡会让写入值和实际渲染差一截，
+     量出来全是过渡起点 —— 而且每一层都差，叠起来就是内层戳出外层。 */
+  /* 拖块靠近：只做高亮，不在这里改尺寸。
+     改尺寸必须沿祖先链一起改 —— 见 延长链()。
+     只给这一层加 min-height，它爹那块照样那么高，
+     结果就是内容区从容器里戳出去。 */
+  .body.over{
+    border-color:var(--cn);
+    background:#122019;
+    box-shadow:inset 0 0 0 1px #7ee78744;
+  }
+  .body::after{content:'拖块进来';position:absolute;left:8px;top:6px;
+    color:#39424f;font-size:11px;pointer-events:none}
+  .body:has(> .blk)::after{display:none}
+
+  .palette-grip{position:absolute;top:0;right:-3px;width:8px;height:100%;
+    cursor:col-resize;z-index:6}
+  .palette-grip::after{content:'';position:absolute;top:50%;left:3px;width:2px;height:34px;
+    margin-top:-17px;background:#39424f;border-radius:1px;transition:background .12s}
+  .palette-grip:hover::after,.palette-grip.按着::after{background:var(--cn)}
+  .palette-grip:hover,.palette-grip.按着{background:#7ee78722}
+
+  .孤岛提示{position:absolute;left:40px;top:12px;padding:4px 10px;border-radius:5px;
+    background:#2a1414;color:var(--bad);font-size:11.5px;border:1px solid #442020;
+    z-index:50;pointer-events:none}
+  .孤岛提示.hidden{display:none}
+  .fld.有选项{cursor:pointer}
+
+  .palette.回收{background:#2a1414;box-shadow:inset 0 0 0 2px #ff6b6b66}
+  .palette.回收::after{content:'松手删掉';position:absolute;left:12px;bottom:12px;
+    color:var(--bad);font-size:11px;pointer-events:none}
+
+  .branch{border-top:1px dashed #2b3341}
+  .branch .head{cursor:default}
+
+  .code{width:38%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  .codelines{margin:0;padding:6px 0;overflow:auto;flex:1;
+    font-size:11.5px;line-height:1.55;white-space:pre;
+    font-family:inherit;user-select:text}
+  .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
+  .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
+    color:#39424f;user-select:none;font-size:10.5px}
+  .codelines .tx{flex:1;min-width:0;white-space:pre;color:var(--cs);word-break:break-all}
+  .codelines .ln.bad{background:#2a1414}
+  .codelines .ln.bad .tx{color:#ff9a9a}
+  .codelines .ln.warn2{background:#241f10}
+  .codelines .ln.warn2 .tx{color:#f0c674}
+  .codelines .ln.闪{background:#1c3326}
+
+  .errcount{float:right;font-size:10.5px;color:var(--dim)}
+  .errcount.有错{color:var(--bad)}
+  .errs{flex:none;max-height:38%;overflow:auto;border-top:1px solid #442020;
+    background:#1a1010}
+  .errs.hidden{display:none}
+  .err{display:flex;gap:8px;padding:4px 10px;font-size:11.5px;cursor:pointer;
+    border-bottom:1px solid #2a1a1a;line-height:1.45}
+  .err:hover{background:#2a1a1a}
+  .err .码{flex:none;width:52px;color:#d08080;font-size:10.5px}
+  .err .位{flex:none;width:44px;color:#7b8494;font-size:10.5px}
+  .err .说{flex:1;min-width:0;color:#e0c0c0}
+  .err.警{opacity:.75}
+  .err.警 .码{color:#c8a060}
+  .warn{padding:4px 10px;background:#2a1414;color:var(--bad);font-size:11px;
+    border-top:1px solid #442020}
+  .warn.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中文套式 · 自由画布</h1>
+  <span class="hint">块随便摆 ｜ 拖进虚线框 = 进那个盒子 ｜ 盒子里也能随便摆</span>
+  <span class="spacer"></span>
+  <button id="undoBtn" title="Ctrl+Z">↶ 撤销</button>
+  <button id="redoBtn" title="Ctrl+Y">↷ 重做</button>
+  <span id="curFile" class="dirchip 文件" title="这份画布存到哪个 .cs">本份：还没存过</span>
+  <span id="engineDir" class="dirchip" title="编译检查要用的引擎目录">引擎：自动找</span>
+  <span id="unityDir" class="dirchip" title="设置不了">Unity 目录：未设</span>
+  <button id="saveUnityBtn" title="直接写进 Unity 项目的 Assets 目录（整份覆盖）">存到 Unity</button>
+  <button id="copyBtn">复制 C#</button>
+  <button id="clearBtn">清空</button>
+</header>
+
+<nav id="tabs" class="tabs"></nav>
+
+<main>
+  <aside class="palette">
+    <h2>点一下加块</h2>
+    <div id="palette"></div>
+  </aside>
+
+  <section class="stage">
+    <div id="world"><div id="hintEmpty">从左边点一个块开始</div></div>
+  </section>
+
+  <section class="code">
+    <div class="title">生成的 C#<span id="errCount" class="errcount"></span></div>
+    <div class="codelines" id="out"></div>
+    <div class="warn hidden" id="warn"></div>
+    <div class="errs hidden" id="errs"></div>
+  </section>
+</main>
+
+<script>
+/* ===== translator.js ===== */
+(function () {
+
+// ============================================================
+// 中文套式 → C# 翻译器（核心逻辑，浏览器与 Node 通用）
+// ============================================================
+
+// 输出目标：'console' = 控制台程序，'unity' = Unity 的 MonoBehaviour
+let 输出目标 = 'console';
+function 设目标(t) { 输出目标 = t; }
+
+// 打印：控制台 vs Unity 两条命
+function 打印调用(参数) {
+  return 输出目标 === 'unity'
+    ? `Debug.Log(${参数});`
+    : `Console.WriteLine(${参数});`;
+}
+
+// 标识符字典：中文名 → 英文名（可自行扩）
+const IDENT = {
+  '数字们': 'numbers',
+  '数字': 'num',
+  '列表': 'list',
+  '结果': 'result',
+  '平方们': 'squares',
+  '总和': 'total',
+  '总数': 'total',
+  '总': 'sum',
+  '数': 'n',
+  '值': 'value',
+  '文本': 'text',
+};
+
+// 中文运算符 → C#（长词在前，避免「大于等于」被「大于」吃掉）
+const OPS = [
+  [/不等于/g, '!='],
+  [/大于等于|不小于/g, '>='],
+  [/小于等于|不大于/g, '<='],
+  [/大于/g, '>'],
+  [/小于/g, '<'],
+  [/等于/g, '=='],
+  [/并且|而且/g, '&&'],
+  [/或者/g, '||'],
+  [/取余/g, '%'],
+  [/加上|加/g, '+'],
+  [/减去|减/g, '-'],
+  [/乘以|乘/g, '*'],
+  [/除以|除/g, '/'],
+];
+
+// 把中文标识符换成英文名。
+// 关键：必须按「整个标识符」替换，不能做子串替换——
+// 否则「总数」会被拆成「总」+「数」→ "sumn"，把词毁掉。
+function 换标识符(s) {
+  return s.replace(/[A-Za-z_][A-Za-z0-9_]*|[一-龥]+/g, 词 => IDENT[词] || 词);
+}
+
+// 全角标点 → 半角。引号里的内容不动（那是字符串，不能改）。
+const 标点表 = {
+  '（': '(', '）': ')', '［': '[', '］': ']', '｛': '{', '｝': '}',
+  '，': ',', '；': ';', '：': ':', '、': ',', '　': ' ',
+  '＜': '<', '＞': '>', '＝': '=', '＋': '+', '－': '-', '＊': '*', '／': '/',
+};
+function 归一化标点(s) {
+  let out = '', 在引号里 = false;
+  for (const ch of s) {
+    if (ch === '"') { 在引号里 = !在引号里; out += ch; continue; }
+    out += 在引号里 ? ch : (标点表[ch] || ch);
+  }
+  return out;
+}
+
+// 表达式：运算符 + 标识符 + 全角标点转半角
+function 翻表达式(s) {
+  let r = s.trim();
+  r = 换标识符(r);
+  for (const [re, to] of OPS) r = r.replace(re, to);
+  r = 归一化标点(r);
+  return r;
+}
+
+// 单行翻译（保留原缩进）
+function 翻一行(line) {
+  const indent = line.match(/^\s*/)[0];
+  // 全角标点先归一：括号、分号、逗号、等号……不管怎么打都认
+  // 行尾分号统一剥掉，由生成侧决定加不加，避免出现 ;;
+  const t = 归一化标点(line.trim()).replace(/;\s*$/, '');
+  const 包 = code => code === '' ? '' : indent + code;
+
+  // 空行 / 注释：丢掉
+  if (!t) return '';
+  if (t.startsWith('//') || t.startsWith('# ')) return '';
+
+  let m;
+
+  // —— 块开始 ——
+  // 括号半角/全角都收；行尾的 { 可写可不写
+  const 开 = '[（(]', 闭 = '[）)]', 括号行 = `^([^（(]+)${开}(.+?)${闭}\\s*\\{?\\s*$`;
+
+  // 遍历（列表 中 x）{   （与中文教材对齐：foreach 就叫「遍历」）
+  m = t.match(new RegExp(`^遍历${开}(.+?)\\s*(?:的|中)\\s*(?:每一个\\s*)?(\\w+)${闭}\\s*\\{?\\s*$`));
+  if (m) return 包(`foreach (var ${m[2]} in ${翻表达式(m[1])}) {`);
+
+  // 设若（条件）{
+  m = t.match(new RegExp(`^设若${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  if (m) return 包(`if (${翻表达式(m[1])}) {`);
+
+  // } 否则 {    或    否则 {
+  if (/^\}\s*否则\s*\{?$/.test(t)) return 包('} else {');
+
+  // 只要（条件）{        —— 条件成立就一直做（while）
+  m = t.match(new RegExp(`^只要${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  if (m) return 包(`while (${翻表达式(m[1])}) {`);
+
+  // 重复（次数）{        —— 数着次数做（for）
+  m = t.match(new RegExp(`^重复${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  if (m) return 包(`for (int i = 0; i < ${翻表达式(m[1])}; i++) {`);
+
+  // 定义 名 = 值
+  m = t.match(/^定义\s*(\S+)\s*=\s*(.+?)\s*;?\s*$/);
+  if (m) return 包(`var ${换标识符(m[1])} = ${翻表达式(m[2])};`);
+
+  // —— 单行语句 ——
+  // 打印（...）
+  m = t.match(new RegExp(`^打印${开}(.+?)${闭}\\s*$`));
+  if (m) return 包(打印调用(翻表达式(m[1])));
+
+  // 返回 ...
+  m = t.match(/^返回\s+(.+?)\s*$/);
+  if (m) return 包(`return ${翻表达式(m[1])};`);
+
+  // 块结束
+  if (t === '}' || t === '结束') return 包('}');
+
+  // 块头已自带 {，单独一行的 { 吞掉
+  if (t === '{') return '';
+
+  // —— 兜底 ——
+  // 以这些词开头却一条规则都没匹配上，说明这行写错了。
+  // 绝不假装翻译成功：明说出来，让它显眼。
+  const 块首词 = ['定义', '设若', '只要', '重复', '遍历', '打印', '返回', '否则'];
+  const 首词 = (t.match(/^(\S+?)(?:[\s（(]|$)/) || [])[1] || '';
+  if (块首词.includes(首词)) {
+    return 包(`// ⚠ 这行没认出结构，原样留着：${t}`);
+  }
+
+  // 其他：当作表达式语句落地（已有分号就不再加）
+  const 式子 = 翻表达式(t);
+  return 包(式子.endsWith(';') ? 式子 : `${式子};`);
+}
+
+// 翻译整段（保留原缩进）
+function 翻译(text) {
+  const 代码 = text.split(/\r?\n/).map(翻一行).join('\n');
+
+  // 兜底检查：C# 里不该残留中文标识符。
+  // 残留 = 这个名字还没进 IDENT 字典，编译会失败。绝不装作成功。
+  const 残留 = [...new Set(
+    代码.split('\n')
+      .filter(l => !/^\s*\/\//.test(l))          // 跳过注释行
+      .join(' ')
+      .replace(/"[^"]*"/g, '""')                 // 跳过字符串字面量，那是给人看的
+      .match(/[一-龥]+/g) || []
+  )];
+
+  if (!残留.length) return 代码;
+
+  const 提示 = `// ⚠ 这些名字还没有英文名，C# 编译不过：${残留.join('、')}\n` +
+               `//   到 translator.js 顶部的 IDENT 里补一行 "${残留[0]}": "英文名"\n`;
+  return 提示 + 代码;
+}
+
+// 包成 Unity 的 MonoBehaviour 骨架。
+// Unity 没有顶层语句：所有代码必须住在类的某个方法里（这里放 Start）。
+function 翻译Unity(中文源码, 类名 = '中文脚本') {
+  设目标('unity');
+  const 体 = 翻译(中文源码).split('\n')
+    .map(l => (l.trim() ? '        ' + l : ''))
+    .join('\n');
+
+  return [
+    'using UnityEngine;',
+    '',
+    `public class ${类名} : MonoBehaviour`,
+    '{',
+    '    void Start()',
+    '    {',
+    体,
+    '    }',
+    '}',
+    '',
+  ].join('\n');
+}
+
+const 出口 = { 翻译, 翻译Unity, 翻一行, 翻表达式, 换标识符, 设目标 };
+if (typeof window !== 'undefined') {
+  window.翻译 = 翻译;
+  window.翻译Unity = 翻译Unity;
+}
+if (typeof module !== 'undefined') module.exports = 出口;
+
+})();
+
+</script>
+<script>
+/* ===== unity-words.js ===== */
+(function () {
+
+// ============================================================
+// Unity API 中英词表
+// 格式：中文（english）—— 记不住时看括号，编辑器里写哪个都行
+// ============================================================
+
+// ---- 类型 ----
+const 类型词表 = {
+  '整数': 'int',
+  '小数': 'float',
+  '文本': 'string',
+  '布尔': 'bool',
+  '向量': 'Vector3',
+  '物体': 'GameObject',
+  '组件': 'Component',
+  '刚体': 'Rigidbody',
+  '碰撞': 'Collider',
+  '颜色': 'Color',
+  '变换': 'Transform',
+  '精灵': 'SpriteRenderer',
+  // 列表单独给类型：数组 int[] 没有 Add，要增删必须用 List
+  '整数列表': 'List<int>',
+  '小数列表': 'List<float>',
+  '文本列表': 'List<string>',
+  '物体列表': 'List<GameObject>',
+  '变换列表': 'List<Transform>',
+};
+
+// ---- 成员（带点访问：目标.位置 → 目标.position）----
+const 成员词表 = {
+  // Transform 变换
+  '位置': 'position',
+  '本地位置': 'localPosition',
+  '旋转': 'rotation',
+  '本地旋转': 'localRotation',
+  '缩放': 'localScale',
+  '本地欧拉': 'localEulerAngles',
+  '父物体': 'parent',
+  '子物体数': 'childCount',
+  '向前': 'forward',
+  '向上': 'up',
+  '向右': 'right',
+
+  // GameObject 物体
+  '名字': 'name',
+  '激活': 'activeSelf',
+  '标签': 'tag',
+
+  // Rigidbody 刚体
+  '速度': 'velocity',
+  '质量': 'mass',
+  '角速度': 'angularVelocity',
+  '重力': 'useGravity',
+
+  // Color / Sprite
+  '颜色': 'color',
+  '透明度': 'a',
+  '红': 'r',
+  '绿': 'g',
+  '蓝': 'b',
+};
+
+// ---- 独立函数 / 静态成员 ----
+const 函数词表 = {
+  '销毁': 'Destroy',
+  '实例化': 'Instantiate',
+  '设置激活': 'SetActive',
+  '获得组件': 'GetComponent',
+  '添加组件': 'AddComponent',
+  '找物体': 'Find',
+  '加力': 'AddForce',
+  '打印': 'Debug.Log',
+  '警告': 'Debug.LogWarning',
+  '报错': 'Debug.LogError',
+  '时间': 'Time.time',
+  '帧间隔': 'Time.deltaTime',
+  '固定帧间隔': 'Time.fixedDeltaTime',
+  '水平轴': 'Input.GetAxis',
+  '按下键': 'Input.GetKeyDown',
+  '按住键': 'Input.GetKey',
+  '抬起键': 'Input.GetKeyUp',
+  '零向量': 'Vector3.zero',
+  '一向量': 'Vector3.one',
+};
+
+// ---- Unity 固定方法名（引擎按名字调用，不能改）----
+const 生命周期词表 = {
+  '开始时': 'Start',
+  '更新时': 'Update',
+  '物理更新时': 'FixedUpdate',
+  '晚更新时': 'LateUpdate',
+  '销毁时': 'OnDestroy',
+  '启用时': 'OnEnable',
+  '禁用时': 'OnDisable',
+  '碰撞进入时': 'OnCollisionEnter',
+  '碰撞离开时': 'OnCollisionExit',
+  '触发进入时': 'OnTriggerEnter',
+  '触发离开时': 'OnTriggerExit',
+  '鼠标按下时': 'OnMouseDown',
+};
+
+// 统一导出：浏览器挂 window，Node 走 require
+const UnityWords = { 类型词表, 成员词表, 函数词表, 生命周期词表 };
+
+if (typeof window !== 'undefined') window.UnityWords = UnityWords;
+if (typeof module !== 'undefined') module.exports = UnityWords;
+
+})();
+
+</script>
+<script>
+/* ===== zh2unity.js ===== */
+(function () {
+
+// ============================================================
+// 中文套式 → Unity C# 脚本生成器
+// 支持类结构：类 / 字段 / 方法 / 语句
+// 词表独立在 unity-words.js，格式「中文（english）」
+// ============================================================
+
+// 词表来源：浏览器用 window.UnityWords，Node 用 require
+const _W = (typeof window !== 'undefined' && window.UnityWords)
+  ? window.UnityWords
+  : require('./unity-words.js');
+
+const { 类型词表, 成员词表, 函数词表, 生命周期词表 } = _W;
+
+// 兼容别名
+const 类型表 = { ...类型词表, '真值': 'bool' };
+const 固定方法名 = 生命周期词表;
+
+// 成员访问：目标.位置 → 目标.position；英文原样保留
+function 译成员(s) {
+  return s.replace(/\.([\u4e00-\u9fa5]+)/g,
+    (全, 名) => (成员词表[名] ? '.' + 成员词表[名] : 全));
+}
+
+// 独立函数 / 静态成员：打印（x）→ Debug.Log(x)
+const 函数名 = Object.keys(函数词表)
+  .sort((a, b) => b.length - a.length)   // 长的先换，避免「打印」吃掉「打印警告」
+  .map(中 => [new RegExp(中, 'g'), 函数词表[中]]);
+
+// 内置对象
+const 内置 = [
+  [/自己/g, 'gameObject'],
+  [/空(?![\u4e00-\u9fa5])/g, 'null'],
+  [/真(?![\u4e00-\u9fa5])/g, 'true'],
+  [/假(?![\u4e00-\u9fa5])/g, 'false'],
+  [/新向量/g, 'new Vector3'],
+];
+
+// 中英运算符
+const 运算符 = [
+  [/不等于/g, '!='],
+  [/大于等于|不小于/g, '>='],
+  [/小于等于|不大于/g, '<='],
+  [/大于/g, '>'],
+  [/小于/g, '<'],
+  [/等于/g, '=='],
+  [/并且|而且/g, '&&'],
+  [/或者/g, '||'],
+  [/加上|加/g, '+'],
+  [/减去|减/g, '-'],
+  [/乘以|乘/g, '*'],
+  [/除以|除/g, '/'],
+];
+
+// 全角 → 半角
+const 标点 = {
+  '（': '(', '）': ')', '［': '[', '］': ']', '｛': '{', '｝': '}',
+  '，': ',', '；': ';', '：': ':', '　': ' ',
+  '＜': '<', '＞': '>', '＝': '=', '＋': '+', '－': '-', '＊': '*', '／': '/',
+};
+function 归一(s) {
+  let out = '', 引号 = false;
+  for (const ch of s) {
+    if (ch === '"') { 引号 = !引号; out += ch; continue; }
+    out += 引号 ? ch : (标点[ch] || ch);
+  }
+  return out;
+}
+
+// 按键：W / 空格 / 鼠标左键 → KeyCode.W …
+const 按键表 = {
+  'W': 'KeyCode.W', 'A': 'KeyCode.A', 'S': 'KeyCode.S', 'D': 'KeyCode.D',
+  '空格': 'KeyCode.Space', '回车': 'KeyCode.Return', '鼠标左键': 'KeyCode.Mouse0',
+};
+function 按键表达式(参数) {
+  const [键 = 'W', 方式 = '按住'] = String(参数).split(/[，,]/).map(s => s.trim());
+  const 码 = 按键表[键] || 键;
+  const 法 = { '按住': 'GetKey', '按下': 'GetKeyDown', '松开': 'GetKeyUp' }[方式] || 'GetKey';
+  return `Input.${法}(${码})`;
+}
+
+// 表达式翻译
+function 算(式) {
+  let r = 归一(式).trim();
+
+  // 表达式位置的构造调用（写在「值」字段里也能用）
+  r = r.replace(/新建列表\s*[（(]([^）)]+)[）)]/g,
+    (_, 类) => {
+      const 全 = 类型表[类.trim()] || 类.trim();
+      return `new ${/^(List|Dictionary|HashSet)</.test(全) ? 全 : 'List<' + 全 + '>'}` + '()';
+    });
+  r = r.replace(/获得组件\s*[（(]([^）)]+)[）)]/g,
+    (_, 类) => `GetComponent<${类型表[类.trim()] || 类.trim()}>()`);
+
+  r = 译成员(r);
+  for (const [re, to] of 函数名) r = r.replace(re, to);
+  for (const [re, to] of 内置) r = r.replace(re, to);
+  for (const [re, to] of 运算符) r = r.replace(re, to);
+  return r;
+}
+
+// 参数表：整数 伤害, 文本 名字  →  int 伤害, string 名字
+function 译参数(表) {
+  if (!表.trim()) return '';
+  return 表.split(/[,，]/).map(段 => {
+    const p = 段.trim().split(/\s+/);
+    const 类型 = 类型表[p[0]] || p[0];
+    return p.length > 1 ? `${类型} ${p[1]}` : 类型;
+  }).join(', ');
+}
+
+// 单行翻译；depth = 当前大括号深度
+function 译一行(原行, depth) {
+  const 缩进 = '    '.repeat(depth);
+  const t = 归一(原行).trim().replace(/;\s*$/, '');
+  if (!t) return null;
+  if (t.startsWith('//')) return null;
+
+  let m;
+
+  // 使用 X
+  m = t.match(/^使用\s+(.+)$/);
+  if (m) return { 行: `using ${m[1]};`, 深: 0 };
+
+  // 公开的类 X : Y
+  m = t.match(/^公开的类\s+(\S+)(?:\s*:\s*(\S+))?$/);
+  if (m) return { 行: `public class ${m[1]}${m[2] ? ' : ' + m[2] : ''}`, 深: 1 };
+
+  // 公开<类型> 名 = 值
+  m = t.match(new RegExp(`^公开(${Object.keys(类型表).join('|')})\\s+(\\S+)\\s*=\\s*(.+)$`));
+  if (m) return { 行: `public ${类型表[m[1]]} ${m[2]} = ${算(m[3])};`, 深: 0 };
+
+  // 公开的 名 : 类型（类型也吃中文词表：变换 → Transform）
+  m = t.match(/^公开的\s+(\S+)\s*:\s*(\S+)$/);
+  if (m) return { 行: `public ${类型表[m[2]] || m[2]} ${m[1]};`, 深: 0 };
+
+  // 访问修饰符：公开 / 私有 / 受保护，写法和「字段」保持一致
+  const 修饰表 = { '公开': 'public', '私有': 'private', '受保护': 'protected' };
+  const 类型们 = Object.keys(类型表).join('|');
+
+  for (const [中文, cs] of Object.entries(修饰表)) {
+    // <修饰><类型> 名 = 值
+    m = t.match(new RegExp(`^${中文}(${类型们})\\s+(\\S+)\\s*=\\s*(.+)$`));
+    if (m) return { 行: `${cs} ${类型表[m[1]]} ${m[2]} = ${算(m[3])};`, 深: 0 };
+
+    // <修饰>的 名 : 类型
+    m = t.match(new RegExp(`^${中文}的\\s+(\\S+)\\s*:\\s*(\\S+)$`));
+    if (m) return { 行: `${cs} ${类型表[m[2]] || m[2]} ${m[1]};`, 深: 0 };
+
+    // <修饰>方法 方法名（参数）[返回 类型] / <修饰>的方法 方法名（参数）[返回 类型]
+    const 方法头 = 中文 === '公开' ? '公开的方法' : 中文 + '方法';
+    m = t.match(new RegExp(`^${方法头}\\s+(\\S+?)\\s*[（(](.*)[）)](?:\\s*返回\\s*(\\S+))?$`));
+    if (m) {
+      const 名 = 固定方法名[m[1]] || m[1];
+      const 返 = m[3] ? (类型表[m[3]] || m[3]) : 'void';
+      return { 行: `${cs} ${返} ${名}(${译参数(m[2])})`, 深: 1 };
+    }
+  }
+
+  // 方法 名（参数）返回 类型 —— 不带访问修饰符但有返回类型
+  m = t.match(/^方法\s+(\S+?)\s*[（(](.*)[）)](?:\s*返回\s*(\S+))?$/);
+  if (m) {
+    const 名 = 固定方法名[m[1]] || m[1];
+    const 返 = m[3] ? (类型表[m[3]] || m[3]) : 'void';
+    return { 行: `${返} ${名}(${译参数(m[2])})`, 深: 1 };
+  }
+
+  // 局部变量 x = 随机数(1,101)
+  m = t.match(/^局部变量\s+(\S+)\s*=\s*随机数[（(](.+?)[）)]$/);
+  if (m) return { 行: `var ${m[1]} = UnityEngine.Random.Range(${m[2]});`, 深: 0 };
+
+  // 局部变量 x = 新建对象(玩家,"小明",100)
+  m = t.match(/^局部变量\s+(\S+)\s*=\s*新建对象[（(](.*?)[）)]$/);
+  if (m) {
+    const 段 = m[2].split(/[,，]/);
+    const 类 = (段[0] || '').trim();
+    const 参 = 段.slice(1).join(',').trim();
+    return { 行: `var ${m[1]} = new ${类}(${参 ? 译参数(参) : ''});`, 深: 0 };
+  }
+
+  // 设属性(transform,position,new Vector3(0,0,0))
+  m = t.match(/^设属性[（(](.*?),(.*?),(.+)[）)]$/);
+  if (m) return { 行: `${m[1].trim()}.${m[2].trim()} = ${m[3].trim()};`, 深: 0 };
+
+  // 局部变量 x = 取属性(transform,position)
+  m = t.match(/^局部变量\s+(\S+)\s*=\s*取属性[（(](.*?),(.*?)[）)]$/);
+  if (m) return { 行: `var ${m[1]} = ${m[2].trim()}.${m[3].trim()};`, 深: 0 };
+
+  // 在 rb 上调 Play(参数)
+  m = t.match(/^在\s+(\S+)\s+上调\s+(\S+?)[（(](.*)[）)]$/);
+  if (m) return { 行: `${m[1]}.${m[2]}(${m[3]});`, 深: 0 };
+
+  // 平移(0,0,1 * Time.deltaTime) / 转动(0,1,0)
+  m = t.match(/^平移[（(](.*?)[）)]$/);
+  if (m) return { 行: `transform.Translate(${m[1]});`, 深: 0 };
+
+  m = t.match(/^转动[（(](.*?)[）)]$/);
+  if (m) return { 行: `transform.Rotate(${m[1]});`, 深: 0 };
+
+  // 切换场景("关卡2")
+  m = t.match(/^切换场景[（(](.*?)[）)]$/);
+  if (m) return { 行: `SceneManager.LoadScene(${m[1]});`, 深: 0 };
+
+  // 无返回 方法名（参数）[返回 类型] —— 不带访问修饰符，等于默认可见性
+  m = t.match(/^无返回\s+(\S+?)\s*[（(](.*)[）)](?:\s*返回\s*(\S+))?$/);
+  if (m) {
+    const 名 = 固定方法名[m[1]] || m[1];
+    const 返 = m[3] ? (类型表[m[3]] || m[3]) : 'void';
+    return { 行: `${返} ${名}(${译参数(m[2])})`, 深: 1 };
+  }
+
+  // 设若（条件）
+  m = t.match(/^设若\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `if (${算(m[1])})`, 深: 1 };
+
+  // 否则若（条件）  —— 必须在「否则」之前判断
+  m = t.match(/^否则若\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `else if (${算(m[1])})`, 深: 1 };
+
+  // 否则
+  if (/^否则$/.test(t)) return { 行: 'else', 深: 1 };
+
+  // 跳过 / 继续
+  if (/^跳出$/.test(t)) return { 行: 'break;', 深: 0 };
+  if (/^继续$/.test(t)) return { 行: 'continue;', 深: 0 };
+
+  // 多分支（值） / 遇（值） / 其他
+  m = t.match(/^多分支\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `switch (${算(m[1])})`, 深: 1 };
+
+  m = t.match(/^遇\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `case ${算(m[1])}:`, 深: 1 };
+
+  if (/^其他$/.test(t)) return { 行: 'default:', 深: 1 };
+
+  // 尝试 / 捕获
+  if (/^尝试$/.test(t)) return { 行: 'try', 深: 1 };
+  if (/^捕获$/.test(t)) return { 行: 'catch', 深: 1 };
+
+  // 加一（x） / 减一（x）
+  m = t.match(/^加一\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}++;`, 深: 0 };
+  m = t.match(/^减一\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}--;`, 深: 0 };
+
+  // 局部变量 名 = 值
+  m = t.match(/^局部变量\s+(\S+)\s*=\s*(.+)$/);
+  if (m) return { 行: `var ${m[1]} = ${算(m[2])};`, 深: 0 };
+
+  // 新建列表（类型）—— 单独成句，C# 里不合法，留着只为兼容老文件
+  m = t.match(/^新建列表\s*[（(](.+?)[）)]$/);
+  if (m) {
+    const 全 = 类型表[m[1]] || m[1];
+    return { 行: `// 新建列表要接到一个变量上（用「存到」）`, 深: 0 };
+  }
+
+  // 设置激活（对象，真/假）
+  m = t.match(/^设置激活\s*[（(](.+?)\s*[，,]\s*(.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}.SetActive(${算(m[2])});`, 深: 0 };
+
+  // 公开的属性（可读可写 / 只读）
+  m = t.match(/^公开属性\s+(\S+)\s+(\S+)$/);
+  if (m) return { 行: `public ${类型表[m[1]] || m[1]} ${m[2]} { get; set; }`, 深: 0 };
+
+  m = t.match(/^公开只读属性\s+(\S+)\s+(\S+)$/);
+  if (m) return { 行: `public ${类型表[m[1]] || m[1]} ${m[2]} { get; }`, 深: 0 };
+
+  // 构造函数 类名（参数）
+  m = t.match(/^构造函数\s+(\S+?)\s*[（(](.*)[）)]$/);
+  if (m) return { 行: `public ${m[1]}(${译参数(m[2])})`, 深: 1 };
+
+  // 数组 整数 名单 = 新数组（1，2，3）
+  m = t.match(/^数组\s+(\S+)\s+(\S+)\s*=\s*新数组\s*[（(](.*)[）)]$/);
+  if (m) return { 行: `${类型表[m[1]] || m[1]}[] ${m[2]} = { ${m[3]} };`, 深: 0 };
+
+  // 添加（列表，值）
+  m = t.match(/^添加\s*[（(](.+?)\s*[，,]\s*(.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}.Add(${算(m[2])});`, 深: 0 };
+
+  // 删除第几个（列表，下标）
+  m = t.match(/^删除第几个\s*[（(](.+?)\s*[，,]\s*(.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}.RemoveAt(${算(m[2])});`, 深: 0 };
+
+  // 清空（列表）
+  m = t.match(/^清空\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `${算(m[1])}.Clear();`, 深: 0 };
+
+  // 读按键（W）  后面会跟自己一个大括号
+  m = t.match(/^读按键\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `if (${按键表达式(m[1])})`, 深: 1 };
+
+  // 只要（条件）
+  m = t.match(/^只要\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `while (${算(m[1])})`, 深: 1 };
+
+  // 重复（次数）
+  m = t.match(/^重复\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `for (int i = 0; i < ${算(m[1])}; i++)`, 深: 1 };
+
+  // 遍历（列表 中 x）
+  m = t.match(/^遍历\s*[（(](.+?)\s*(?:的|中)\s*(\S+?)[）)]$/);
+  if (m) return { 行: `foreach (var ${m[2]} in ${算(m[1])})`, 深: 1 };
+
+  // 打印（...）
+  m = t.match(/^打印\s*[（(](.+?)[）)]$/);
+  if (m) return { 行: `Debug.Log(${算(m[1])});`, 深: 0 };
+
+  // 返回 X
+  m = t.match(/^返回\s+(.+)$/);
+  if (m) return { 行: `return ${算(m[1])};`, 深: 0 };
+
+  // 结束块 / 右括号
+  if (t === '}' || t === '结束') return { 行: '}', 深: -1 };
+
+  // 单独一行 { ：块头的 { 由生成器自动补，这里吞掉，不然会出现两个 {
+  if (t === '{') return null;
+
+  // 其他：普通语句
+  const 式 = 算(t);
+  return { 行: 式.endsWith(';') ? 式 : `${式};`, 深: 0 };
+}
+
+// 翻译整份脚本
+function 译脚本(中文源码) {
+  const 结果 = [];
+  let depth = 0;
+
+  for (const 原行 of 中文源码.split(/\r?\n/)) {
+    const 原缩进 = 原行.match(/^\s*/)[0];
+    const 判 = 译一行(原行, depth);
+    if (!判) { continue; }
+
+    if (判.深 === -1) {
+      depth = Math.max(0, depth - 1);
+      结果.push('    '.repeat(depth) + 判.行);
+      continue;
+    }
+
+    结果.push('    '.repeat(depth) + 判.行);
+    if (判.深 === 1) {
+      结果.push('    '.repeat(depth) + '{');
+      depth += 1;
+    }
+  }
+
+  // 收尾：没关掉的块补上
+  while (depth > 0) {
+    depth -= 1;
+    结果.push('    '.repeat(depth) + '}');
+  }
+
+  let 文 = 结果.join('\n') + '\n';
+
+  // 用到 List 就自动补 using —— 否则 new List<int>() 编译不过
+  if (/\bList</.test(文) && !文.includes('using System.Collections.Generic')) {
+    文 = 'using System.Collections.Generic;\n' + 文;
+  }
+
+  return 文;
+}
+
+if (typeof window !== 'undefined') window.Zh2Unity = { 译脚本, 译一行 };
+if (typeof module !== 'undefined') module.exports = { 译脚本, 译一行 };
+
+})();
+
+</script>
+<script>
+/* ===== blocks.js ===== */
+(function () {
+
+// ============================================================
+// 块 → 中文套式源码 → C#
+// 规则：块只管「结构」，表达式留给你自己敲
+// ============================================================
+
+// 字段说明：
+//   提示 = 灰字占位，写「这里该填什么」
+//   默认 = 新建时直接填进去的通用值
+//   选项 = 预设下拉（可手打）
+//   英文 = 旁边显示的 C# 对应词
+//   组   = 侧边栏分组
+//   ⚠ 键名不能叫「类型」—— b.类型 是块的种类，撞了块就废
+
+const 类型选项 = ['整数', '小数', '文本', '布尔', '向量', '物体',
+                  '组件', '刚体', '碰撞', '颜色', '变换', '精灵'];
+
+// 容器块的类型选项多一组「列表」类型
+const 容器类型选项 = [...类型选项,
+                      '整数列表', '小数列表', '文本列表', '物体列表', '变换列表'];
+
+// 分组按「搭骨架 → 让它动 → 分情况 → 反复做 → 容器 → Unity → 杂项」排
+const 分组顺序 = ['骨架', '动作', '判断', '循环', '容器', 'Unity', '杂项'];
+
+// 每块是干什么用的 —— 点块上的 ? 就显示这段。
+// 写给刚学的人看的：说清「它解决什么问题」和「容易踩哪里」，不背术语。
+const 块说明 = {
+  '类': '把一堆相关的变量和方法装进一个盒子。\nUnity 里每个脚本都是一个类，必须继承 MonoBehaviour 才挂得到物体上。\n一个类，通常就是「一种物体的行为」。',
+  '字段': '属于这个物体的变量，不是某个方法里的临时货。\n写「公开」的能在 Unity 检视面板里直接看到、直接改数值。\n填了初始值就是「出生时是多少」。',
+  '属性': '带开关的字段。\n选「只读」就是外面能看、不能改 —— 想改只能走类自己提供的方法。\n适合血量这种「外面可以读、但不该随便写」的量。',
+  '方法': '一串按顺序执行的指令，起个名字方便反复用。\nUnity 有几个名字是它自己会喊的：开始时、更新时、物理更新时……\n你只要照抄名字，到点它自己调用，不用你手动喊。',
+  '构造函数': 'new 一个对象时自动跑一次，用来把初始状态摆好。\n⚠️ MonoBehaviour 一般用不到 —— Unity 的组件是引擎自己创建的，不经过你的 new。',
+  '定义变量': '方法里临时用的小盒子，方法跑完就没了。\n别和「字段」搞混：字段属于整个物体，这个只在这一次执行里活着。',
+  '改变量': '把变量的值换掉。\n「赋值」是直接换成新值；「加 / 减」是拿原值改。\n记住 x = x + 1：右边先算，算完再存回左边。',
+  '调用': '执行别的方法。\n名字要和那边写的完全一样，括号里是传过去的参数。',
+  '打印': '往 Unity 控制台打一行字。\n调到哪一步卡住了、某个值到底是多少 —— 在中间插一句打印，是最省事的查法。\n⚠️ 文字要用双引号包起来："死了"，光写 死了 是不行的。',
+  '返回': '把结果交回给调用它的地方，同时**立刻结束**这个方法。\n方法声明了有返回值，就每条路都得返回。',
+  '设若': '条件成立才做框里的。\n这是整条判断链的开头，段上能继续加「否则若」「否则」。',
+  '否则若': '上面那个没成立，再来看看这个。\n可以有好几段，从上往下挨个判，谁先成立就做谁，做完就跳出整条链。',
+  '否则': '全都不成立就走这儿。\n只能有一个，而且必须放最后 —— C# 硬要求，放中间编译不过。',
+  '多分支': '拿一个值，去跟下面几段挨个比，对上哪个做哪个。\n和「设若」的区别：它比的是「等于某个值」，不是条件判断。',
+  '遇': '多分支里的一段：值等于这个，就走进去。\nC# 要求每段最后能跳出，所以没写「跳出」的话生成时会自动给你补一句。',
+  '其他': '多分支里一段都没对上时走这儿。必须放最后。',
+  '重复': '数着次数做。\n「重复（3）」就是把里面的做三遍。次数事先知道的时候用它。',
+  '只要': '条件还成立就一直做。\n圈数事先不知道的时候用它。\n⚠️ 里面的东西必须能让条件变化，否则就是死循环，Unity 会直接卡死。',
+  '遍历': '拿着一个列表，一项一项过一遍。\n每一项临时叫这个名字（默认「项」），里面就能直接用它。',
+  '跳出': '立刻跳出这一层循环，剩下的圈数不做了。',
+  '继续': '这一轮剩下的跳过，直接开始下一轮。',
+  '数组': '长度固定的一串同类型数据。\n定下来就不能加减元素，但里面的值可以改。取用要靠下标，从 0 开始数。',
+  '新建列表': '能长能缩的一串数据。\n要「随时加一个、随时删一个」就用列表，别用数组。',
+  '添加': '往列表末尾塞一个进去。',
+  '删除': '删掉第几个（从 0 数）。\n删完后面的会往前挪一格，下标会变。',
+  '清空': '内容全删光，列表本身留着。',
+  '获得组件': '从自己身上取下某个组件来用。\n要操作刚体、碰撞体、动画，都得先拿到它。\n⚠️ 拿不到会得到空，用之前最好先判一下。',
+  '读按键': '按住 W 就进框里做。\n三种方式：按住 = 一直按着就一直做；按下 = 刚按下去那一下；松开 = 抬手那一下。\n⚠️ 游戏输入不建议用「更新时」里读按键，Unity 新版推荐走 Input System。',
+  '实例化': '照着预制体复制一个新物体出来。\n打子弹、刷怪、掉金币，都是它。',
+  '销毁': '把物体删掉。\n给个延时就是「几秒后再删」，适合做消失动画。',
+  '设置激活': '把物体显示 / 隐藏，里面的子物体也跟着一起。\n和销毁的区别：这个还能再打开。',
+  '警告': '控制台打个黄色警告。\n不至于崩，但你可能想知道「这里走到不该走的地方了」。',
+  '报错': '控制台打个红色错误。\n一般是「不该发生的事发生了」，比警告更严重。',
+  '尝试': '可能出错的代码放这儿。\n出错了不会当场崩，会跳到下面的「捕获」继续走。',
+  '捕获': '上面出错了就走到这儿 —— 用来兜底、或者给玩家一个提示。',
+  '新建对象': '照着一张图纸造一个新对象出来，这就是 C# 的 new。造的时候会跑一次构造函数，括号里给的就是它的参数。别和「实例化」搞混：那个是 Unity 的 Instantiate，照预制体复制物体。',
+  '随机数': '摇一个随机整数存进变量。下界是「含」的，上界是「不含」的 —— 想掷 1~6 的骰子就写 1 和 7。别自己 new Random()，Unity 有现成的 UnityEngine.Random。',
+  '设属性': '给某个组件的属性赋值，比如把速度设成新值、把颜色换掉、把文字改掉。用这一个块就能覆盖 Unity 那几百个现成组件，不用为每个组件单独加块。属性名照抄 Unity 文档里的英文。',
+  '取属性': '把一个组件的属性读出来存进变量，比如先记下当前位置，等下好算差值。',
+  '调对象方法': '让某个组件做件事，比如放音效、播动画、停下、设个动画开关。参数照抄 Unity 文档。',
+  '平移': '让本物体挪一段距离，参数是 (x, y, z)。「按每秒算」打开就会乘上 Time.deltaTime —— 不乘的话电脑越快跑得越快。',
+  '转动': '让本物体转一个角度，参数是 (x, y, z)，单位是度。',
+  '切换场景': '切到另一个场景，或者重开当前场景。需要 using SceneManager —— 少了这行编译不过，生成时会自动帮你加上。',
+  '手写一行': '上面这些块没有的写法，就在这儿直接敲。\n中文套式和 C# 都认。',
+};
+
+const 块定义 = {
+
+  // ================= ① 骨架：定义你的东西有哪些 =================
+  '类': {
+    英文: 'class', 组: '骨架',
+    可容纳: true,
+    模板: b => [`公开的类 ${b.名 || '未命名'}${b.继承 ? ' : ' + b.继承 : ''}`],
+    字段: [
+      { k: '名', 提示: '类名', 默认: '' },
+      { k: '继承', 提示: '继承谁', 默认: 'MonoBehaviour',
+        选项: ['MonoBehaviour', 'ScriptableObject', 'StateMachineBehaviour'] },
+    ],
+  },
+  '字段': {
+    英文: 'field', 组: '骨架',
+    可容纳: false,
+    模板: b => {
+      const 修饰 = b.访问 === '私有' ? '私有'
+                 : b.访问 === '受保护' ? '受保护'
+                 : '公开';
+      const 类型 = b.数据类型 || '整数';
+      const 名 = b.名 || '变量';
+      return b.值 ? [`${修饰}${类型} ${名} = ${b.值}`]
+                  : [`${修饰}的 ${名} : ${类型}`];
+    },
+    字段: [
+      { k: '访问', 提示: '谁能用', 默认: '公开', 选项: ['公开', '私有', '受保护'] },
+      { k: '数据类型', 提示: '类型', 默认: '整数', 选项: 类型选项 },
+      { k: '名', 提示: '变量名', 默认: '' },
+      { k: '值', 提示: '初始值（留空=只声明）', 默认: '0' },
+    ],
+  },
+  '属性': {
+    英文: 'property', 组: '骨架',
+    可容纳: false,
+    // 只读 / 可读可写 / 带检查，用「权限」下拉区分
+    模板: b => {
+      const 名 = b.名 || '属性';
+      const 类型 = b.数据类型 || '整数';
+      switch (b.读写 || '可读可写') {
+        case '只读': return [`公开只读属性 ${类型} ${名}`];
+        default:    return [`公开属性 ${类型} ${名}`];
+      }
+    },
+    字段: [
+      { k: '数据类型', 提示: '类型', 默认: '整数', 选项: 类型选项 },
+      { k: '名', 提示: '属性名（首字母常大写）', 默认: '' },
+      { k: '读写', 提示: '能不能改', 默认: '可读可写', 选项: ['可读可写', '只读'] },
+    ],
+  },
+  '方法': {
+    英文: 'method', 组: '骨架',
+    可容纳: true,
+    // 原来这里看的是 b.公开，可字段里根本没这一项 —— 所以永远走「无返回」。
+    // 现在用「访问」下拉控制 public / private / protected / 不带修饰符。
+    模板: b => {
+      const 访 = b.访问 || '默认';
+      const 有返回 = b.返回什么 && b.返回什么 !== '无返回';
+      const 头 = 访 === '公开' ? '公开的方法'
+               : 访 === '私有' ? '私有方法'
+               : 访 === '受保护' ? '受保护方法'
+               : (有返回 ? '方法' : '无返回');
+      const 尾 = 有返回 ? ' 返回 ' + b.返回什么 : '';
+      return [`${头} ${b.名 || '未命名'}（${b.参数 || ''}）${尾}`];
+    },
+    字段: [
+      { k: '访问', 提示: '谁能调用', 默认: '默认',
+        选项: ['默认', '公开', '私有', '受保护'] },
+      { k: '返回什么', 提示: '交回什么东西', 默认: '无返回',
+        选项: ['无返回', '整数', '小数', '文本', '布尔', '向量', '物体'] },
+      { k: '名', 提示: '方法名', 默认: '',
+        选项: ['开始时', '更新时', '物理更新时', '晚更新时', '销毁时',
+               '启用时', '禁用时', '碰撞进入时', '触发进入时'] },
+      { k: '参数', 提示: '参数（如：整数 伤害）', 默认: '' },
+    ],
+  },
+  '新建对象': {
+    英文: 'new', 组: '骨架',
+    可容纳: false,
+    模板: b => [`局部变量 ${b.存到 || '对象'} = 新建对象（${b.类名 || '玩家'}，${b.参数 || ''}）`],
+    字段: [
+      { k: '存到', 提示: '存到哪个变量', 默认: '' },
+      { k: '类名', 提示: '造什么类的', 默认: '' },
+      { k: '参数', 提示: '括号里的参数（可空）', 默认: '' },
+    ],
+  },
+  '构造函数': {
+    英文: 'constructor', 组: '骨架',
+    可容纳: true,
+    模板: b => [`构造函数 ${b.名 || '类名'}（${b.参数 || ''}）`],
+    字段: [
+      { k: '名', 提示: '和类名一样', 默认: '' },
+      { k: '参数', 提示: '参数（如：文本 名，整数 血）', 默认: '' },
+    ],
+  },
+
+  // ================= ② 动作：每次执行就做一件事 =================
+  '定义变量': {
+    英文: 'var', 组: '动作',
+    可容纳: false,
+    模板: b => [`局部变量 ${b.名 || '临时'} = ${b.值 || '0'}`],
+    字段: [
+      { k: '名', 提示: '新变量叫什么', 默认: '' },
+      { k: '值', 提示: '初始值或算式', 默认: '0' },
+    ],
+  },
+  '改变量': {
+    英文: 'variable', 组: '动作',
+    可容纳: false,
+    模板: b => {
+      const 名 = b.名 || '变量';
+      const 值 = b.值 || '0';
+      switch (b.运算法 || '赋值') {
+        case '赋值': return [`${名} = ${值}`];
+        case '加':   return [`${名} = ${名} + ${值}`];
+        case '减':   return [`${名} = ${名} - ${值}`];
+        case '乘':   return [`${名} = ${名} * ${值}`];
+        case '除':   return [`${名} = ${名} / ${值}`];
+        case '求余': return [`${名} = ${名} % ${值}`];
+        case '加一': return [`${名} = ${名} + 1`];
+        case '减一': return [`${名} = ${名} - 1`];
+        default:     return [`${名} = ${值}`];
+      }
+    },
+    字段: [
+      { k: '名', 提示: '哪个变量', 默认: '' },
+      { k: '运算法', 提示: '怎么变', 默认: '赋值',
+        选项: ['赋值', '加', '减', '乘', '除', '求余', '加一', '减一'] },
+      { k: '值', 提示: '值或算式（加一/减一 可留空）', 默认: '0' },
+    ],
+  },
+  '调用': {
+    英文: 'call', 组: '动作',
+    可容纳: false,
+    模板: b => [`${b.名 || '方法'}（${b.参数 || ''}）`],
+    字段: [
+      { k: '名', 提示: '方法名', 默认: '' },
+      { k: '参数', 提示: '参数（如：自己，1）', 默认: '' },
+    ],
+  },
+  '打印': {
+    英文: 'Debug.Log', 组: '动作',
+    可容纳: false,
+    模板: b => [`打印（${b.值 || '"信息"'}）`],
+    字段: [{ k: '值', 提示: '要输出的内容', 默认: '"信息"' }],
+  },
+  '随机数': {
+    英文: 'Random.Range', 组: '动作',
+    可容纳: false,
+    模板: b => [`局部变量 ${b.存到 || '骰子'} = 随机数（${b.下限 || '1'}，${b.上限 || '101'}）`],
+    字段: [
+      { k: '存到', 提示: '存到哪个变量', 默认: '' },
+      { k: '下限', 提示: '最小是几（含）', 默认: '1' },
+      { k: '上限', 提示: '最大到几（不含）', 默认: '101' },
+    ],
+  },
+  '返回': {
+    英文: 'return', 组: '动作',
+    可容纳: false,
+    模板: b => [`返回 ${b.值 || '0'}`],
+    字段: [{ k: '值', 提示: '返回值', 默认: '0' }],
+  },
+
+  // ================= ③ 判断：按条件走不同路 =================
+  // 这三个是一整条 if 链：设若 → 否则若… → 否则。
+  // 界面上做成一个大框里的几段，「设若」块上带两个按钮往后续。
+  '设若': {
+    英文: 'if', 组: '判断',
+    可容纳: true, 分支头: true,
+    模板: b => [`设若（${b.条件 || '条件'}）`],
+    字段: [{ k: '条件', 提示: '条件（如：血量 小于等于 0）', 默认: '变量 大于 0',
+             选项: ['变量 大于 0', '变量 小于 0', '变量 等于 0', '变量 不等于 空'] }],
+  },
+  '否则若': {
+    英文: 'else if', 组: '判断',
+    可容纳: true, 分支续: true,
+    模板: b => [`否则若（${b.条件 || '条件'}）`],
+    字段: [{ k: '条件', 提示: '再判一个条件', 默认: '变量 大于 0' }],
+  },
+  '否则': {
+    英文: 'else', 组: '判断',
+    可容纳: true, 分支续: true, 终结分支: true,
+    模板: () => ['否则'],
+    字段: [],
+  },
+  '多分支': {
+    英文: 'switch', 组: '判断',
+    可容纳: true,
+    模板: b => [`多分支（${b.值 || '变量'}）`],
+    字段: [{ k: '值', 提示: '要判断的变量', 默认: '变量' }],
+  },
+  '遇': {
+    英文: 'case', 组: '判断',
+    可容纳: true,
+    模板: b => [`遇（${b.值 || '1'}）`],
+    字段: [{ k: '值', 提示: '等于这个值时', 默认: '1' }],
+  },
+  '其他': {
+    英文: 'default', 组: '判断',
+    可容纳: true,
+    模板: () => ['其他'],
+    字段: [],
+  },
+
+  // ================= ④ 循环：反复做 =================
+  '重复': {
+    英文: 'for', 组: '循环',
+    可容纳: true,
+    模板: b => [`重复（${b.次数 || '1'}）`],
+    字段: [{ k: '次数', 提示: '做几次', 默认: '3' }],
+  },
+  '只要': {
+    英文: 'while', 组: '循环',
+    可容纳: true,
+    模板: b => [`只要（${b.条件 || '条件'}）`],
+    字段: [{ k: '条件', 提示: '条件（如：血量 大于 0）', 默认: '变量 大于 0' }],
+  },
+  '遍历': {
+    英文: 'foreach', 组: '循环',
+    可容纳: true,
+    模板: b => [`遍历（${b.列表 || '列表'} 中 ${b.元素 || '项'}）`],
+    字段: [
+      { k: '列表', 提示: '列表名', 默认: '列表' },
+      { k: '元素', 提示: '每一项叫什么', 默认: '项' },
+    ],
+  },
+  '跳出': {
+    英文: 'break', 组: '循环',
+    可容纳: false,
+    模板: () => ['跳出'],
+    字段: [],
+  },
+  '继续': {
+    英文: 'continue', 组: '循环',
+    可容纳: false,
+    模板: () => ['继续'],
+    字段: [],
+  },
+
+  // ================= ⑤ 容器：数组与列表 =================
+  '数组': {
+    英文: 'array', 组: '容器',
+    可容纳: false,
+    模板: b => [`数组 ${b.数据类型 || '整数'} ${b.名 || '名单'} = 新数组（${b.内容 || '1，2，3'}）`],
+    字段: [
+      { k: '数据类型', 提示: '装什么类型', 默认: '整数', 选项: 类型选项 },
+      { k: '名', 提示: '数组名', 默认: '' },
+      { k: '内容', 提示: '元素（用逗号隔开）', 默认: '1，2，3' },
+    ],
+  },
+  '新建列表': {
+    英文: 'new List', 组: '容器',
+    可容纳: false,
+    // 原来只产出一个表达式，单独成句是 new List<int>(); —— 这不是合法语句。
+    // 补一个「存到」，落成 var X = new List<int>();
+    模板: b => [`局部变量 ${b.存到 || '列表'} = 新建列表（${b.数据类型 || '整数'}）`],
+    字段: [
+      { k: '存到', 提示: '存到哪个变量', 默认: '' },
+      { k: '数据类型', 提示: '装什么类型', 默认: '整数', 选项: 容器类型选项 },
+    ],
+  },
+  '添加': {
+    英文: 'Add', 组: '容器',
+    可容纳: false,
+    模板: b => [`添加（${b.名 || '列表'}，${b.值 || '0'}）`],
+    字段: [
+      { k: '名', 提示: '列表名（不是数组，数组不能加）', 默认: '列表' },
+      { k: '值', 提示: '要加什么', 默认: '0' },
+    ],
+  },
+  '删除': {
+    英文: 'RemoveAt', 组: '容器',
+    可容纳: false,
+    模板: b => [`删除第几个（${b.名 || '列表'}，${b.下标 || '0'}）`],
+    字段: [
+      { k: '名', 提示: '列表名', 默认: '列表' },
+      { k: '下标', 提示: '第几个（从 0 数）', 默认: '0' },
+    ],
+  },
+  '清空': {
+    英文: 'Clear', 组: '容器',
+    可容纳: false,
+    模板: b => [`清空（${b.名 || '列表'}）`],
+    字段: [{ k: '名', 提示: '列表名', 默认: '列表' }],
+  },
+
+  // ================= ⑥ Unity：引擎给的能力 =================
+  '获得组件': {
+    英文: 'GetComponent', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`局部变量 ${b.存到 || '组件'} = 获得组件（${b.组件类型 || '刚体'}）`],
+    字段: [
+      { k: '存到', 提示: '存到哪个变量', 默认: '' },
+      // ⚠ 键名不能叫「类型」：生成时 {...b.字段, 类型: b.类型} 会把块种类盖上去
+      { k: '组件类型', 提示: '取什么组件', 默认: '刚体', 选项: 类型选项 },
+    ],
+  },
+  '读按键': {
+    英文: 'Input.GetKey', 组: 'Unity',
+    可容纳: true,
+    模板: b => [`读按键（${b.键 || 'W'}，${b.方式 || '按住'}）`],
+    字段: [
+      { k: '键', 提示: '哪个键', 默认: 'W',
+        选项: ['W', 'A', 'S', 'D', '空格', '回车', '鼠标左键'] },
+      { k: '方式', 提示: '按住/按下/松开', 默认: '按住', 选项: ['按住', '按下', '松开'] },
+    ],
+  },
+  '实例化': {
+    英文: 'Instantiate', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`实例化（${b.预制 || '预制体'}）`],
+    字段: [{ k: '预制', 提示: '预制体变量', 默认: '预制体' }],
+  },
+  '销毁': {
+    英文: 'Destroy', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`销毁（${b.目标 || '自己'}，${b.延时 || '0'}）`],
+    字段: [
+      { k: '目标', 提示: '销毁谁', 默认: '自己', 选项: ['自己', '目标', '物体'] },
+      { k: '延时', 提示: '几秒后（0=立刻）', 默认: '0' },
+    ],
+  },
+  '设置激活': {
+    英文: 'SetActive', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`设置激活（${b.对象 || '目标'}，${b.开 || '真'}）`],
+    字段: [
+      { k: '对象', 提示: '哪个物体', 默认: '目标' },
+      { k: '开', 提示: '真 / 假', 默认: '真', 选项: ['真', '假'] },
+    ],
+  },
+  '平移': {
+    英文: 'Translate', 组: 'Unity',
+    可容纳: false,
+    模板: b => {
+      const 尾 = b.每帧 === '是' ? ' * Time.deltaTime' : '';
+      return [`平移（${b.x || '0'}，${b.y || '0'}，${b.z || '0'}${尾}）`];
+    },
+    字段: [
+      { k: 'x', 提示: 'x', 默认: '0' },
+      { k: 'y', 提示: 'y', 默认: '0' },
+      { k: 'z', 提示: 'z', 默认: '1' },
+      { k: '每帧', 提示: '按每秒算', 默认: '是', 选项: ['是', '否'] },
+    ],
+  },
+  '转动': {
+    英文: 'Rotate', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`转动（${b.x || '0'}，${b.y || '1'}，${b.z || '0'}）`],
+    字段: [
+      { k: 'x', 提示: 'x', 默认: '0' },
+      { k: 'y', 提示: 'y', 默认: '1' },
+      { k: 'z', 提示: 'z', 默认: '0' },
+    ],
+  },
+  '切换场景': {
+    英文: 'SceneManager.LoadScene', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`切换场景（${b.场景 || '"关卡2"'}）`],
+    字段: [
+      { k: '场景', 提示: '场景名（带双引号）', 默认: '"关卡2"' },
+    ],
+  },
+  // ---- 通用成员访问：不为每个组件做块，靠这三个覆盖所有现成组件 ----
+  '设属性': {
+    英文: 'set', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`设属性（${b.对象 || 'transform'}，${b.属性 || 'position'}，${b.值 || '0'}）`],
+    字段: [
+      { k: '对象', 提示: '哪个组件', 默认: 'transform', 选项: ['transform', 'gameObject', 'rb', 'animator', 'audioSource', 'camera', 'renderer', 'collider', 'text', 'image', 'canvas', 'navAgent'] },
+      { k: '属性', 提示: '哪个属性', 默认: 'position', 选项: ['position', 'rotation', 'localScale', 'velocity', 'color', 'enabled', 'text', 'material', 'isTrigger', 'tag', 'name', 'activeSelf', 'sprite'] },
+      { k: '值', 提示: '设成什么', 默认: 'new Vector3(0, 0, 0)' },
+    ],
+  },
+  '取属性': {
+    英文: 'get', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`局部变量 ${b.存到 || '值'} = 取属性（${b.对象 || 'transform'}，${b.属性 || 'position'}）`],
+    字段: [
+      { k: '存到', 提示: '存到哪个变量', 默认: '' },
+      { k: '对象', 提示: '哪个组件', 默认: 'transform', 选项: ['transform', 'gameObject', 'rb', 'animator', 'audioSource', 'camera', 'renderer', 'collider', 'text', 'image', 'canvas', 'navAgent'] },
+      { k: '属性', 提示: '哪个属性', 默认: 'position', 选项: ['position', 'rotation', 'localScale', 'velocity', 'color', 'enabled', 'text', 'material', 'isTrigger', 'tag', 'name', 'activeSelf', 'sprite'] },
+    ],
+  },
+  '调对象方法': {
+    英文: 'call on', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`在 ${b.对象 || 'audioSource'} 上调 ${b.方法 || 'Play'}（${b.参数 || ''}）`],
+    字段: [
+      { k: '对象', 提示: '哪个组件', 默认: 'audioSource', 选项: ['transform', 'gameObject', 'rb', 'animator', 'audioSource', 'camera', 'renderer', 'collider', 'text', 'image', 'canvas', 'navAgent'] },
+      { k: '方法', 提示: '调哪个方法', 默认: 'Play', 选项: ['Play', 'Stop', 'Pause', 'SetTrigger', 'SetBool', 'SetFloat', 'SetInteger', 'SetActive', 'SetDestination', 'PlayOneShot', 'CrossFade'] },
+      { k: '参数', 提示: '参数（可空）', 默认: '' },
+    ],
+  },
+  '警告': {
+    英文: 'Debug.LogWarning', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`警告（${b.值 || '"小心"'}）`],
+    字段: [{ k: '值', 提示: '要警告的内容', 默认: '"小心"' }],
+  },
+  '报错': {
+    英文: 'Debug.LogError', 组: 'Unity',
+    可容纳: false,
+    模板: b => [`报错（${b.值 || '"出错了"'}）`],
+    字段: [{ k: '值', 提示: '要报错的内容', 默认: '"出错了"' }],
+  },
+
+  // ================= ⑦ 杂项：兜底 =================
+  '尝试': {
+    英文: 'try', 组: '杂项',
+    可容纳: true,
+    模板: () => ['尝试'],
+    字段: [],
+  },
+  '捕获': {
+    英文: 'catch', 组: '杂项',
+    可容纳: true,
+    模板: () => ['捕获'],
+    字段: [],
+  },
+  '手写一行': {
+    英文: 'custom', 组: '杂项',
+    可容纳: false,
+    模板: b => [b.内容 || '// 空'],
+    字段: [{
+      k: '内容',
+      提示: '一行随便写（中文套式或 C# 都行）',
+      默认: '变量 = 变量 + 1',
+    }],
+  },
+};
+
+// 选项池：键用「块类型.字段名」，不能只用字段名。
+function 收集选项() {
+  const 池 = {};
+  for (const [类型, 定义] of Object.entries(块定义)) {
+    for (const f of 定义.字段 || []) {
+      if (!f.选项) continue;
+      池[类型 + '.' + f.k] = f.选项;
+    }
+  }
+  return 池;
+}
+
+// 按分组归类，给侧边栏用
+function 按组归类() {
+  const 组 = {};
+  for (const 名 of 分组顺序) 组[名] = [];
+  for (const [类型, 定义] of Object.entries(块定义)) {
+    const g = 定义.组 || '杂项';
+    (组[g] = 组[g] || []).push(类型);
+  }
+  return 组;
+}
+
+// 新建一个块：字段直接填上通用默认值
+function 新块(类型) {
+  const 定义 = 块定义[类型];
+  const b = { 类型, 子: [] };
+  (定义.字段 || []).forEach(f => { b[f.k] = f.默认 ?? ''; });
+  return b;
+}
+
+// 块树 → 中文套式源码（保留嵌套缩进）
+function 生成中文(块树) {
+  const 行 = [];
+
+  const 有类 = 块树.some(b => b.类型 === '类');
+  const 已写使用 = 块树.some(b => b.类型 === '使用');
+
+  // 某些块必须在文件头上补 using，不然编译不过 —— 与其让人记，不如自动加
+  const 用到 = (类型名) => {
+    let 有 = false;
+    (function 找(列表) {
+      for (const b of 列表) {
+        if (b.类型 === 类型名) 有 = true;
+        找(b.子 || []);
+        for (const 段 of b.分支 || []) 找(段.子 || []);
+      }
+    })(块树);
+    return 有;
+  };
+
+  const 头 = [];
+  if (有类 && !已写使用) 头.push('使用 UnityEngine');
+  if (用到('切换场景')) 头.push('使用 UnityEngine.SceneManagement');
+  if (用到('改文字')) 头.push('使用 UnityEngine.UI');
+  if (头.length) 行.push(...头, '');
+
+  const 走 = (块们, 深, 父) => {
+    for (const b of 块们) {
+      const 定义 = 块定义[b.类型];
+      if (!定义) continue;
+
+      const 缩进 = '    '.repeat(深);
+      for (const 行内容 of 定义.模板(b)) 行.push(缩进 + 行内容);
+
+      if (定义.可容纳) {
+        行.push(缩进 + '{');
+        走(b.子 || [], 深 + 1, b);
+
+        // C# 要求每个 case 能以 break/return 脱离开关，否则 CS8070
+        if (父 && 父.类型 === '多分支' && (b.类型 === '遇' || b.类型 === '其他')) {
+          const 最后 = (b.子 || []).slice(-1)[0];
+          if (!最后 || (最后.类型 !== '跳出' && 最后.类型 !== '返回')) {
+            行.push('    '.repeat(深 + 1) + '跳出');
+          }
+        }
+
+        行.push(缩进 + '}');
+      }
+    }
+  };
+
+  走(块树, 0, null);
+  return 行.join('\n');
+}
+
+// 块树 → 中文 → C#
+function 生成CSharp(块树) {
+  const 中文 = 生成中文(块树);
+  const 译 = (typeof window !== 'undefined' && window.Zh2Unity)
+    ? window.Zh2Unity.译脚本
+    : require('./zh2unity.js').译脚本;
+  return 译(中文);
+}
+
+const 出口 = { 块定义, 块说明, 新块, 生成中文, 生成CSharp, 收集选项, 按组归类, 分组顺序 };
+
+if (typeof window !== 'undefined') window.Blocks = 出口;
+if (typeof module !== 'undefined') module.exports = 出口;
+
+})();
+
+</script>
+<script>
+/* ===== blocks2.js ===== */
+(function () {
+
+// ============================================================
+// 树模型：块可以装块
+//
+//   {
+//     id, 类型,
+//     字段: { 名: 值, ... },
+//     子:   [块, ...],                       // 内容（垂直排列，按顺序生成）
+//     分支: [{ 字段: {...}, 子: [块...] }],   // 只有 if 类用：否则若 / 否则
+//   }
+//
+// 为什么换成树：
+//   原来三个独立块靠「后链 + 坐标」拼成一条 if，
+//   于是出现了：拖散、一段长高盖住下一段、松手归属判错、无限撑大……
+//   树模型里 if 就是一块，里面的段是它自己的身体，不存在「拼」。
+// ============================================================
+
+const 块定义 = (typeof window !== 'undefined' && window.Blocks)
+  ? window.Blocks.块定义
+  : require('./blocks.js').块定义;
+
+let 序号 = 0;
+
+function 新(类型, 字段 = {}) {
+  const 定义 = 块定义[类型];
+  if (!定义) throw new Error('未知块类型：' + 类型);
+
+  const b = {
+    id: ++序号,
+    类型,
+    字段: {},
+    子: [],
+    分支: [],
+    x: 0, y: 0,      // 只有在画布顶层时才用（自由摆放）
+  };
+  (定义.字段 || []).forEach(f => {
+    b.字段[f.k] = (f.k in 字段) ? 字段[f.k] : (f.默认 ?? '');
+  });
+  return b;
+}
+
+// if 链专用：加一段分支。终结=true 表示「否则」
+function 加分支(块, 字段 = {}, 终结 = false) {
+  块.分支.push({ 字段, 子: [], 终结 });
+  return 块.分支[块.分支.length - 1];
+}
+
+// ---------------- 生成顺序 ----------------
+// 不是单纯「谁在上面谁先」——那样横向摆开就白摆了。
+// 改成：把垂直方向上重叠的块算作同一行，行内从左到右读，行与行之间从上到下。
+// 这样你可以把几条不相干的语句并排摆着，不用一根线。
+function 按行读(子们) {
+  const 排好 = [...子们].sort((a, b) => (a.y || 0) - (b.y || 0) || (a.x || 0) - (b.x || 0));
+  const 行 = [];
+  let 当前 = null;
+  for (const b of 排好) {
+    const 顶 = b.y || 0;
+    const 高 = b._h || (b.子 && b.子.length ? 100 : 32);
+    if (当前 && 顶 < 当前.底) {
+      当前.们.push(b);
+      当前.底 = Math.max(当前.底, 顶 + 高);
+    } else {
+      当前 = { 顶, 底: 顶 + 高, 们: [b] };
+      行.push(当前);
+    }
+  }
+  return 行.flatMap(r => r.们.sort((p, q) => (p.x || 0) - (q.x || 0)));
+}
+
+// ---------------- 生成 ----------------
+// 返回中文套式源码（后续交给 zh2unity 翻成 C#）
+function 生成(根块们) {
+  const 行 = [];
+
+  const 有类 = 根块们.some(b => b.类型 === '类');
+
+  // 某些块必须补 using，不然编译不过 —— 与其让人记，不如自动加
+  const 用到 = (类型名) => {
+    let 有 = false;
+    (function 找(列表) {
+      for (const b of 列表) {
+        if (b.类型 === 类型名) 有 = true;
+        找(b.子 || []);
+        for (const 段 of b.分支 || []) 找(段.子 || []);
+      }
+    })(根块们);
+    return 有;
+  };
+
+  // 把每块里填的内容都收成一串 —— 用到了 UI / AI 的类型名，就得补对应的 using，
+  // 不然「明明代码没错」却编译不过，是新手最容易卡住的一种。
+  const 词们 = [];
+  (function 收(列表) {
+    for (const b of 列表) {
+      for (const v of Object.values(b.字段 || {})) 词们.push(String(v));
+      收(b.子 || []);
+      for (const 段 of b.分支 || []) 收(段.子 || []);
+    }
+  })(根块们);
+  const 词串 = 词们.join(' ');
+
+  const 词们小 = 词串.toLowerCase();
+  const 要UI = /text|image|button|slider|toggle|rawimage/.test(词们小);
+  const 要AI = /(NavMesh|navAgent|navMeshAgent)/i.test(词串);
+
+  const 头 = [];
+  if (有类) 头.push('使用 UnityEngine');
+  if (用到('切换场景')) 头.push('使用 UnityEngine.SceneManagement');
+  if (要UI) 头.push('使用 UnityEngine.UI');
+  if (要AI) 头.push('使用 UnityEngine.AI');
+  if (头.length) 行.push(...头, '');
+
+  const 取值 = b => ({ ...b.字段, 类型: b.类型 });
+
+  const 走块 = (b, 深, 父) => {
+    const 定义 = 块定义[b.类型];
+    if (!定义) return;
+
+    const 缩进 = '    '.repeat(深);
+    for (const 行内容 of 定义.模板(取值(b))) 行.push(缩进 + 行内容);
+
+    if (!定义.可容纳) return;
+
+    // 容器里的块可以随便摆，生成时按「从上到下」排 —— 跟你在画布上看到的一致
+    const 子们 = 按行读(b.子 || []);
+
+    行.push(缩进 + '{');
+    for (const 子 of 子们) 走块(子, 深 + 1, b);
+
+    // C# 要求 case 能脱离开关，否则 CS0163 / CS8070。
+    // blocks.js 里早就补了这一句，blocks2 这条生成路径漏了 —— 同一个坑两条路，只修了一条。
+    if (父 && 父.类型 === '多分支' && (b.类型 === '遇' || b.类型 === '其他')) {
+      const 最后 = 子们[子们.length - 1];
+      if (!最后 || (最后.类型 !== '跳出' && 最后.类型 !== '返回' && 最后.类型 !== '继续')) {
+        行.push('    '.repeat(深 + 1) + '跳出');
+      }
+    }
+
+    行.push(缩进 + '}');
+
+    // 后续分支（否则若 / 否则）
+    for (const 段 of b.分支) {
+      const 段取值 = { ...段.字段, 类型: b.类型 };
+      const 标题 = 段.终结 ? ['否则'] : 块定义['否则若'].模板(段取值);
+      for (const 行内容 of 标题) 行.push(缩进 + 行内容);
+
+      const 段子们 = 按行读(段.子 || []);
+      行.push(缩进 + '{');
+      for (const 子 of 段子们) 走块(子, 深 + 1, b);
+      行.push(缩进 + '}');
+    }
+  };
+
+  const 走一串 = (块们, 深) => {
+    for (const b of 块们) 走块(b, 深, null);
+  };
+
+  走一串(根块们, 0);
+  return 行.join('\n');
+}
+
+// 树 → C#
+function 生成CSharp(根块们) {
+  const 中文 = 生成(根块们);
+  const 译 = (typeof window !== 'undefined' && window.Zh2Unity)
+    ? window.Zh2Unity.译脚本
+    : require('./zh2unity.js').译脚本;
+  return 译(中文);
+}
+
+// ---------------- 增删查 ----------------
+// 在树里按 id 找父容器（返回 {列表, 下标}）
+function 找位置(根块们, id) {
+  const 递归 = (列表, 父) => {
+    for (let i = 0; i < 列表.length; i++) {
+      if (列表[i].id === id) return { 列表, 下标: i, 块: 列表[i], 父 };
+      const r = 递归(列表[i].子, 列表[i]);
+      if (r) return r;
+      for (const 段 of 列表[i].分支) {
+        const r2 = 递归(段.子, 列表[i]);
+        if (r2) return r2;
+      }
+    }
+    return null;
+  };
+  return 递归(根块们, null);
+}
+
+function 删(根块们, id) {
+  const 位 = 找位置(根块们, id);
+  if (!位) return false;
+  位.列表.splice(位.下标, 1);
+  return true;
+}
+
+function 上移(根块们, id) {
+  const 位 = 找位置(根块们, id);
+  if (!位 || 位.下标 === 0) return false;
+  const 列 = 位.列表;
+  [列[位.下标 - 1], 列[位.下标]] = [列[位.下标], 列[位.下标 - 1]];
+  return true;
+}
+
+function 下移(根块们, id) {
+  const 位 = 找位置(根块们, id);
+  if (!位 || 位.下标 === 位.列表.length - 1) return false;
+  const 列 = 位.列表;
+  [列[位.下标 + 1], 列[位.下标]] = [列[位.下标], 列[位.下标 + 1]];
+  return true;
+}
+
+// 把块从树上摘下来（返回块本身，找不到就 null）
+function 摘(根块们, id) {
+  const 位 = 找位置(根块们, id);
+  if (!位) return null;
+  位.列表.splice(位.下标, 1);
+  return 位.块;
+}
+
+const 出口 = {
+  新, 加分支, 生成, 生成CSharp, 按行读,
+  找位置, 删, 上移, 下移, 摘,
+  块定义,
+};
+
+if (typeof window !== 'undefined') window.树 = 出口;
+if (typeof module !== 'undefined') module.exports = 出口;
+
+})();
+
+</script>
+<script>
+const { 块定义 } = window.Blocks;
+const 树 = window.树;
+
+let 根块们 = [];
+let 序号递 = 0;
+const 世界 = document.getElementById('world');
+const 舞台 = document.querySelector('.stage');
+const out = document.getElementById('out');
+const 警告 = document.getElementById('warn');
+
+// 每块自己的坐标都相对它所在的画布（顶层相对 #world，容器内相对 .body）
+function 建(类型, x, y) {
+  const b = 树.新(类型);
+  b.x = x; b.y = y;
+  return b;
+}
+
+function 自适应宽(el) {
+  let 宽 = 0;
+  for (const ch of el.value) 宽 += ch.charCodeAt(0) > 255 ? 15 : 8;
+  el.style.width = Math.max(44, 宽 + 26) + 'px';
+}
+
+// ---------------- 渲染 ----------------
+function 渲染块(b, 序) {
+  const 定义 = 块定义[b.类型];
+  const el = document.createElement('div');
+  el.className = 'blk' + (定义.可容纳 ? ' 容器' : '');
+  el.dataset.t = b.类型;
+  el.dataset.id = b.id;
+  el.style.left = (b.x || 0) + 'px';
+  el.style.top = (b.y || 0) + 'px';
+
+  const head = document.createElement('div');
+  head.className = 'head';
+
+  if (序) {
+    const ord = document.createElement('span');
+    ord.className = 'ord';
+    ord.textContent = 序;
+    ord.title = '这块在它这一层里第 ' + 序 + ' 个执行';
+    head.appendChild(ord);
+  }
+
+  const kind = document.createElement('span');
+  kind.className = 'kind';
+  kind.textContent = b.类型;
+  head.appendChild(kind);
+
+  if (定义.英文) {
+    const en = document.createElement('span');
+    en.className = 'en';
+    en.textContent = 定义.英文;
+    head.appendChild(en);
+  }
+
+  (定义.字段 || []).forEach(f => {
+    const s = document.createElement('input');
+    s.className = 'fld';
+    s.value = b.字段[f.k] ?? '';
+    s.placeholder = f.提示;
+    自适应宽(s);
+    s.addEventListener('input', () => { b.字段[f.k] = s.value; 自适应宽(s); 输出(); });
+    // 这里**不能** stopPropagation —— 拦掉了，块就收不到 pointerdown，
+    // 于是「按在字上」永远拖不动。放它冒泡，交给 阈值拖 看你是点还是拖。
+    head.appendChild(s);
+    // 定义里给了「选项」就再挂一个 ▾：点开是自绘的列表（原生 datalist 弹窗
+    // 是白底、CSS 管不到，暗色主题里刺眼）。输入框照样能直接打字。
+    if (f.选项 && f.选项.length) {
+      const 箭 = document.createElement('span');
+      箭.className = 'ctl 选';
+      箭.textContent = '▾';
+      箭.title = '从常用的里面挑一个';
+      箭.addEventListener('pointerdown', e => e.stopPropagation());
+      箭.addEventListener('click', e => { e.stopPropagation(); 开选项(s, f.选项); });
+      head.appendChild(箭);
+    }
+  });
+
+  if (b.类型 === '设若') {
+    if (!b.分支.some(x => x.终结)) {
+      head.appendChild(做按钮('＋否则若', '再加一个条件分支', () => {
+        树.加分支(b, { 条件: '变量 大于 0' }, false); 重画();
+      }));
+      head.appendChild(做按钮('＋否则', '都不是就…', () => {
+        树.加分支(b, {}, true); 重画();
+      }));
+    }
+  }
+
+  if (window.Blocks.块说明[b.类型]) {
+    head.appendChild(做按钮('?', '这块是干什么用的', () => 显示说明(b.类型, el), '问'));
+  }
+
+  head.appendChild(做按钮('✕', '删除', () => {
+    if (!树.删(根块们, b.id)) 根块们 = 根块们.filter(x => x !== b);
+    重画();
+  }, 'del'));
+
+  el.appendChild(head);
+
+  if (定义.可容纳) el.appendChild(做内容区(b.子));
+
+  b.分支.forEach((段, i) => {
+    const br = document.createElement('div');
+    br.className = 'branch';
+
+    const bh = document.createElement('div');
+    bh.className = 'head';
+
+    const k2 = document.createElement('span');
+    k2.className = 'kind';
+    k2.textContent = 段.终结 ? '否则' : '否则若';
+    bh.appendChild(k2);
+
+    const en2 = document.createElement('span');
+    en2.className = 'en';
+    en2.textContent = 段.终结 ? 'else' : 'else if';
+    bh.appendChild(en2);
+
+    if (!段.终结) {
+      const s = document.createElement('input');
+      s.className = 'fld';
+      s.value = 段.字段.条件 ?? '';
+      s.placeholder = '再判一个条件';
+      自适应宽(s);
+      s.addEventListener('input', () => { 段.字段.条件 = s.value; 自适应宽(s); 输出(); });
+      bh.appendChild(s);
+    }
+
+    // 每一段底下都能再插一个条件分支 —— 不是只有链尾能加
+    if (!段.终结) {
+      bh.appendChild(做按钮('＋否则若', '在这段后面插一个条件分支', () => {
+        b.分支.splice(i + 1, 0, { 字段: { 条件: '变量 大于 0' }, 子: [], 终结: false });
+        重画();
+      }));
+    }
+    // 否则只有一个，而且只能贴在最后
+    if (!段.终结 && !b.分支.some(x => x.终结)) {
+      bh.appendChild(做按钮('＋否则', '都不是就…', () => {
+        b.分支.push({ 字段: {}, 子: [], 终结: true });
+        重画();
+      }));
+    }
+    bh.appendChild(做按钮('✕', '删掉这一分支', () => { b.分支.splice(i, 1); 重画(); }, 'del'));
+    br.appendChild(bh);
+    br.appendChild(做内容区(段.子));
+    el.appendChild(br);
+  });
+
+  挂拖动(b, el);
+
+  return el;
+}
+
+// ---------------- 自绘下拉 ----------------
+let 选项层 = null, 选项锚 = null;
+
+function 关选项() {
+  if (选项层) 选项层.remove();
+  选项层 = null;
+  选项锚 = null;
+}
+
+function 开选项(s, 选项们) {
+  if (选项锚 === s) { 关选项(); return; }
+  关选项();
+
+  const 层 = document.createElement('div');
+  层.className = '选项层';
+  for (const v of 选项们) {
+    const 行 = document.createElement('div');
+    行.className = '选项行' + (v === s.value ? ' 选中' : '');
+    行.textContent = v;
+    行.addEventListener('pointerdown', e => e.preventDefault());   // 别让输入框先失焦
+    行.addEventListener('click', e => {
+      e.stopPropagation();
+      s.value = v;
+      s.dispatchEvent(new Event('input', { bubbles: true }));
+      关选项();
+    });
+    层.appendChild(行);
+  }
+  document.body.appendChild(层);
+
+  const 锚r = s.getBoundingClientRect();
+  const 层r = 层.getBoundingClientRect();
+  let 左 = Math.min(window.innerWidth - 层r.width - 8, Math.max(8, 锚r.left));
+  let 上 = 锚r.bottom + 5;
+  if (上 + 层r.height > window.innerHeight - 8) 上 = Math.max(8, 锚r.top - 层r.height - 5);
+  层.style.left = Math.round(左) + 'px';
+  层.style.top = Math.round(上) + 'px';
+
+  选项层 = 层;
+  选项锚 = s;
+}
+
+document.addEventListener('pointerdown', e => {
+  if (!选项层) return;
+  if (选项层.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('选')) return;
+  关选项();
+}, true);
+
+// ---------------- 说明浮层 ----------------
+// 点块上的 ? 弹出这块的说明。做成浮层而不是往块里塞——
+// 塞进去会把块撑高，跟着影响布局和顺序，只为了看一段字不值当。
+let 说明卡 = null, 说明锚 = null;
+
+function 关说明() {
+  if (说明卡) 说明卡.remove();
+  说明卡 = null;
+  说明锚 = null;
+}
+
+function 显示说明(类型, 锚) {
+  if (说明锚 === 锚) { 关说明(); return; }
+  关说明();
+
+  const 定义 = 块定义[类型];
+  const 卡 = document.createElement('div');
+  卡.className = '说明卡';
+
+  const 头行 = document.createElement('div');
+  头行.className = '说明头';
+  const 名 = document.createElement('b');
+  名.textContent = 类型;
+  头行.appendChild(名);
+  if (定义.英文) {
+    const en = document.createElement('span');
+    en.className = 'en';
+    en.textContent = 定义.英文;
+    头行.appendChild(en);
+  }
+  卡.appendChild(头行);
+
+  const 文 = document.createElement('div');
+  文.className = '说明文';
+  文.textContent = window.Blocks.块说明[类型] || '（还没有写说明）';
+  卡.appendChild(文);
+
+  document.body.appendChild(卡);
+
+  const 锚r = 锚.getBoundingClientRect();
+  const 卡r = 卡.getBoundingClientRect();
+  let 左 = Math.min(window.innerWidth - 卡r.width - 8, Math.max(8, 锚r.left));
+  let 上 = 锚r.bottom + 8;
+  if (上 + 卡r.height > window.innerHeight - 8) 上 = Math.max(8, 锚r.top - 卡r.height - 8);
+  卡.style.left = Math.round(左) + 'px';
+  卡.style.top = Math.round(上) + 'px';
+
+  说明卡 = 卡;
+  说明锚 = 锚;
+}
+
+document.addEventListener('pointerdown', e => {
+  if (!说明卡) return;
+  if (说明卡.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('问')) return;
+  关说明();
+}, true);
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { 关说明(); 关选项(); } });
+
+function 做按钮(文字, 提示, 处理, 额外类) {
+  const s = document.createElement('span');
+  s.className = 'ctl' + (额外类 ? ' ' + 额外类 : '');
+  s.textContent = 文字;
+  s.title = 提示;
+  s.addEventListener('pointerdown', e => e.stopPropagation());
+  s.addEventListener('click', e => { e.stopPropagation(); 处理(); });
+  return s;
+}
+
+// ---------------- 布局 ----------------
+// 子块是绝对定位，撑不开内容区；内容区变高，爹那块会自动变高，
+// 但再往上一层又变成绝对定位 —— 链就断在那儿。
+// 所以尺寸只能自己算，而且**一次算到底**：
+//
+//   内容区宽 = max(子块右边界) + 间距
+//   内容区高 = max(子块下边界) + 间距      ← 间距固定，这就是「下边界之间的距离」
+//   块高     = 头高 + 内容区高 + 底距 [+ 每个分支的同款]
+//
+// 全程只量两样东西：块的「头」有多高、叶子块有多大。
+// 这两样都只受自己内容影响，不受容器影响 —— 量一次就准，量完再也不用回头。
+const 布 = {
+  间距: 20,      // 子块下边界 → 内容区下边界，固定值
+  最小宽: 120,
+  最小高: 56,
+  侧距: 24,      // 内容区左右 margin：16 + 8
+  底距: 10,      // 内容区 margin-bottom（必须和 CSS 的 .body margin 一致）
+  分支线: 1,     // .branch 的 border-top
+  边框: 2,       // 内容区上下各 1px 虚线
+};
+
+function 布局(根们) {
+  const 图 = new Map();
+  (function 走(列表) {
+    for (const b of 列表) {
+      图.set(b.id, b);
+      走(b.子 || []);
+      for (const 段 of b.分支 || []) 走(段.子 || []);
+    }
+  })(根们);
+
+  const 头高 = new Map();
+  const 段头高 = new Map();
+  const 叶 = new Map();
+  for (const el of 世界.querySelectorAll('.blk')) {
+    const id = Number(el.dataset.id);
+    const 头 = el.querySelector(':scope > .head');
+    if (头) 头高.set(id, 头.getBoundingClientRect().height);
+    段头高.set(id, [...el.querySelectorAll(':scope > .branch > .head')]
+      .map(x => x.getBoundingClientRect().height));
+    if (!el.querySelector(':scope > .body')) {
+      const r = el.getBoundingClientRect();
+      叶.set(id, { 宽: r.width, 高: r.height });
+    }
+  }
+
+  // 一个内容区该多大（只看它的子块，不看 DOM）
+  function 体(子们) {
+    let 宽 = 布.最小宽, 高 = 布.最小高;
+    for (const c of 子们 || []) {
+      宽 = Math.max(宽, (c.x || 0) + 块宽(c) + 布.间距);
+      高 = Math.max(高, (c.y || 0) + 块高(c) + 布.间距);
+    }
+    return { 宽, 高 };
+  }
+
+  function 块宽(b) {
+    const s = 叶.get(b.id);
+    if (s) return s.宽;
+    let w = 体(b.子).宽;
+    for (const 段 of b.分支 || []) w = Math.max(w, 体(段.子).宽);
+    return w + 布.侧距;
+  }
+
+  function 块高(b) {
+    const s = 叶.get(b.id);
+    if (s) return s.高;
+    let h = 头高.get(b.id) || 34;
+    if (!块定义[b.类型].可容纳) return h;
+    h += 体(b.子).高 + 布.底距;
+    const 段s = 段头高.get(b.id) || [];
+    (b.分支 || []).forEach((段, i) => {
+      h += (段s[i] || 34) + 布.分支线 + 体(段.子).高 + 布.底距;
+    });
+    return h;
+  }
+
+  // 把算出来的高度记回树对象：生成顺序要拿它判断「哪几块垂直上重叠 = 同一行」
+  (function 记高(列表) {
+    for (const b of 列表) {
+      b._h = 块高(b);
+      b._w = 块宽(b);
+      记高(b.子 || []);
+      for (const 段 of b.分支 || []) 记高(段.子 || []);
+    }
+  })(根们);
+
+  刷顺序(根们, 世界);
+
+  // 尺寸算完，写回各内容区
+  for (const el of 世界.querySelectorAll('.blk')) {
+    const b = 图.get(Number(el.dataset.id));
+    if (!b) continue;
+    const 主 = el.querySelector(':scope > .body');
+    if (主) 写盒(主, 体(b.子));
+    [...el.querySelectorAll(':scope > .branch')].forEach((段el, i) => {
+      const 段 = (b.分支 || [])[i];
+      if (!段) return;
+      const bb = 段el.querySelector(':scope > .body');
+      if (bb) 写盒(bb, 体(段.子));
+    });
+  }
+}
+
+function 写盒(body, s) {
+  const 宽 = Math.round(s.宽 + 布.边框);
+  const 高 = Math.round(s.高 + 布.边框);
+  body.style.setProperty('--w', 宽 + 'px');
+  body.style.setProperty('--h', 高 + 'px');
+  body.style.minWidth = 宽 + 'px';
+  body.style.minHeight = 高 + 'px';
+}
+
+// 内容区 = 小画布。尺寸不在这里定，交给 布局() 统一算。
+function 做内容区(列表) {
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.dataset.box = '1';
+  // 按生成时的顺序编号 —— 并排摆的块是从左到右，不是从上看下来
+  for (const 子 of 列表) body.appendChild(渲染块(子));
+  return body;
+}
+
+// 执行顺序依赖块的真实高度（换行会让块变高），
+// 所以只能在 布局() 把尺寸算完、写回 _h/_w 之后再统一刷。
+// 渲染时先摆着，这里统一刷一遍。
+function 刷顺序(列表, 容器el) {
+  if (!列表 || !列表.length) return;
+  const 序 = 树.按行读(列表);
+  for (let i = 0; i < 序.length; i++) {
+    const b = 序[i];
+    const el = 容器el.querySelector(':scope > .blk[data-id="' + b.id + '"]');
+    const 头 = el && el.querySelector(':scope > .head');
+    if (!头) continue;
+
+    let o = 头.querySelector(':scope > .ord');
+    if (!o) {
+      o = document.createElement('span');
+      o.className = 'ord';
+      头.insertBefore(o, 头.firstChild);
+    }
+    o.textContent = i + 1;
+    o.title = '这块在它这一层里第 ' + (i + 1) + ' 个执行';
+  }
+
+  for (const b of 列表) {
+    const el = 容器el.querySelector(':scope > .blk[data-id="' + b.id + '"]');
+    if (!el) continue;
+    const 主体 = el.querySelector(':scope > .body');
+    if (主体) 刷顺序(b.子 || [], 主体);
+    [...el.querySelectorAll(':scope > .branch')].forEach((段el, k) => {
+      const 段 = (b.分支 || [])[k];
+      const bb = 段 && 段el.querySelector(':scope > .body');
+      if (bb) 刷顺序(段.子 || [], bb);
+    });
+  }
+}
+
+
+function 深(el) {
+  let d = 0, p = el;
+  while (p && p !== document.body) { p = p.parentElement; d++; }
+  return d;
+}
+
+// ---------------- 悬停延长 ----------------
+// 子块是绝对定位，不会撑大内容区；内容区变了高，它爹那块也跟着变，
+// 但再往上一层又是绝对定位 —— 断在那儿了。
+// 所以延长必须是「整条祖先链一起加同样一截」，每层都加，谁也不多。
+const 悬停存底 = new Map();
+let 这格多高 = 76;      // 这一格向下让出多少 —— 按「要放进来的那块有多高」算，不是死数字
+
+// 一格刚好放得下这一块，再留点空
+function 一格高度(块el) {
+  const h = 块el ? 块el.getBoundingClientRect().height : 32;
+  return Math.max(40, Math.round(h) + 22);
+}
+
+function 祖先盒(盒) {
+  const 链 = [];
+  let b = 盒;
+  while (b) {
+    链.push(b);
+    const 主 = b.parentElement;                       // .blk
+    if (!主 || !主.classList.contains('blk')) break;
+    b = 主.parentElement;                             // 再外一层 .body
+    if (!b || !b.classList.contains('body')) break;
+  }
+  return 链;
+}
+
+function 延长链(盒, 加) {
+  for (const b of 祖先盒(盒)) {
+    if (加 > 0) {
+      if (!悬停存底.has(b)) 悬停存底.set(b, b.style.minHeight);
+      const 现 = parseFloat(b.style.minHeight) || 0;
+      b.style.minHeight = (现 + 加) + 'px';
+    } else {
+      if (悬停存底.has(b)) {
+        b.style.minHeight = 悬停存底.get(b);
+        悬停存底.delete(b);
+      }
+    }
+  }
+}
+
+// ---------------- 拖动 ----------------
+function 挂拖动(b, el) {
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', e => {
+    if (e.target.classList.contains('ctl')) return;
+    e.stopPropagation();
+    // 一律先观望：走够距离才算拖。
+    // ⚠️ 这里绝不能一按下就调 开始拖 —— 开始拖第一件事是把块从树上摘下来、
+    // 挂到顶层，所以「单击」会当场把内层块从容器里拽出来。单击必须什么都不做。
+    阈值拖(b, el, e);
+  });
+}
+
+function 阈值拖(b, el, 起) {
+  const x0 = 起.clientX, y0 = 起.clientY;
+  // 按在输入框上给大一点阈值，免得想做文字选择（划选几个字）时被当成拖动
+  const 阈 = 起.target.classList.contains('fld') ? 7 : 4;
+  const 收 = () => {
+    document.removeEventListener('pointermove', 探);
+    document.removeEventListener('pointerup', 收);
+  };
+  const 探 = ev => {
+    if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 阈) return;
+    收();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    开始拖(b, el, 起);
+  };
+  document.addEventListener('pointermove', 探);
+  document.addEventListener('pointerup', 收);
+}
+
+function 开始拖(b, el, 起始) {
+  el.classList.add('dragging');
+  const 起始rect = el.getBoundingClientRect();
+  const 抓x = 起始.clientX - 起始rect.left;
+  const 抓y = 起始.clientY - 起始rect.top;
+
+  // 从树上摘下来，但**不重画** —— 一重画，原来的父容器就按剩下的子块重算高度，
+  // 当场缩回去，看起来像「拖着拖着盒子塌了」。
+  const 原位 = 树.找位置(根块们, b.id);
+  if (原位) 原位.列表.splice(原位.下标, 1);
+  根块们.push(b);
+
+  const wr0 = 世界.getBoundingClientRect();
+  b.x = 起始rect.left - wr0.left;
+  b.y = 起始rect.top - wr0.top;
+
+  // 拖的时候把块挂到 body 上用 fixed 跟手，不再放回 #world。
+  // 留在 .stage 里的话，一拖出画布边缘就被 overflow 裁掉 —— 看着像「拖出来只剩半截」。
+  世界.appendChild(el);          // 先脱离原来的父容器
+  document.body.appendChild(el); // 再挂到最外层
+  el.style.position = 'fixed';
+  el.style.left = '0';
+  el.style.top = '0';
+  el.style.margin = '0';
+  el.style.width = Math.round(起始rect.width) + 'px';   // 锁宽，免得换行改了高度
+  el.style.transform = `translate(${起始rect.left}px, ${起始rect.top}px)`;
+  el.style.pointerEvents = 'none';   // 让底下的内容区能被 elementFromPoint 找到
+
+  const 新el = el;
+  let 悬停盒 = null;
+  let 在托盘上 = false;
+
+  const 移 = ev => {
+    const wx = 世界.getBoundingClientRect();
+    b.x = ev.clientX - wx.left - 抓x;
+    b.y = ev.clientY - wx.top - 抓y;
+    // 屏幕上跟手用视口坐标；b.x/b.y 是画布坐标，松手写回树上用那个
+    新el.style.transform = `translate(${ev.clientX - 抓x}px, ${ev.clientY - 抓y}px)`;
+
+    // 鼠标底下是哪个内容区；顺带把它的宿主容器放大一点做提示
+    const 下 = document.elementFromPoint(ev.clientX, ev.clientY);
+    const 到托盘了 = !!(下 && 下.closest && 下.closest('.palette'));
+    if (到托盘了 !== 在托盘上) {
+      在托盘上 = 到托盘了;
+      调.classList.toggle('回收', 在托盘上);
+    }
+    let 盒 = 下 && 下.closest ? 下.closest('[data-box]') : null;
+    // 落在容器的标题行、边框上也算 —— 不然只有正对着虚线框里面才放得进去，很挑
+    if (!盒 && 下 && 下.closest) {
+      const 主 = 下.closest('.blk.容器');
+      if (主) 盒 = 主.querySelector(':scope > .body');
+    }
+
+    // 自己或自己的子孙：不能塞，就不给「能放这儿」的暗示
+    if (盒) {
+      const 宿主el = 盒.closest('.blk');
+      const 宿主id = 宿主el ? Number(宿主el.dataset.id) : null;
+      if (!宿主id || 树.找位置([b], 宿主id)) 盒 = null;
+    }
+
+    if (盒 !== 悬停盒) {
+      if (悬停盒) {
+        悬停盒.classList.remove('over');
+        const 旧主 = 悬停盒.closest('.blk');
+        if (旧主) 旧主.classList.remove('目标');
+        延长链(悬停盒, -这格多高);
+      }
+      悬停盒 = 盒;
+      if (悬停盒) {
+        悬停盒.classList.add('over');
+        const 新主 = 悬停盒.closest('.blk');
+        if (新主) 新主.classList.add('目标');
+        这格多高 = 一格高度(新el);
+        延长链(悬停盒, 这格多高);
+      }
+    }
+  };
+
+  const 停 = () => {
+    document.removeEventListener('pointermove', 移);
+    document.removeEventListener('pointerup', 停);
+    调.classList.remove('回收');
+    if (悬停盒) {
+      悬停盒.classList.remove('over');
+      const 主 = 悬停盒.closest('.blk');
+      if (主) 主.classList.remove('目标');
+      延长链(悬停盒, -这格多高);
+    }
+
+    let 收下了 = false;
+    if (悬停盒) {
+      const 宿主el = 悬停盒.closest('.blk');
+      const 宿主id = 宿主el ? Number(宿主el.dataset.id) : null;
+      // 不能塞进自己身体里
+      if (宿主id && !树.找位置([b], 宿主id)) {
+        const 宿主位 = 树.找位置(根块们, 宿主id);
+        if (宿主位) {
+          // b.x/b.y 已经是世界坐标，直接换算成相对这个内容区
+          const 盒rect = 悬停盒.getBoundingClientRect();
+          const 世界rect = 世界.getBoundingClientRect();
+          b.x = Math.max(4, b.x - (盒rect.left - 世界rect.left));
+          b.y = Math.max(4, b.y - (盒rect.top - 世界rect.top));
+
+          根块们 = 根块们.filter(x => x !== b);
+          // 找这个盒属于哪个列表（子 or 某分支）
+          收进(宿主位.块, b);
+          收下了 = true;
+        }
+      }
+    }
+
+    if (!收下了) {
+      根块们 = 根块们.filter(x => x !== b);
+      if (!在托盘上) {                   // 拖回托盘 = 扔掉（开始拖时就已从树里摘下来了）
+        b.x = Math.max(0, b.x);
+        b.y = Math.max(0, b.y);
+        根块们.push(b);
+      }
+    }
+    重画();
+  };
+
+  document.addEventListener('pointermove', 移);
+  document.addEventListener('pointerup', 停);
+}
+
+// 把一个块塞进宿主（判断是哪一层的盒子）
+function 收进(宿主, b) {
+  宿主.子.push(b);
+}
+
+// 松手时把重叠的块往下推 —— 这样「插到中间」不用自己挪位置，
+// 放下去后面的一串自动让开。没有重叠的块一个都不动，自由摆放不受影响。
+// 同一行的块（垂直方向上有重叠）当成一组，组内不互相推。
+function 清全部重叠() {
+  let 动过 = false;
+  (function 走(列表) {
+    if (!列表 || !列表.length) return;
+    if (清重叠(列表)) 动过 = true;
+    for (const b of 列表) {
+      走(b.子);
+      for (const 段 of b.分支 || []) 走(段.子);
+    }
+  })(根块们);
+  return 动过;
+}
+
+function 清重叠(列表) {
+  let 动过 = false;
+  if (!列表 || 列表.length < 2) return false;
+  const 已放 = [];
+  for (const b of [...列表].sort((x, y) => (x.y || 0) - (y.y || 0))) {
+    let 顶 = b.y || 0;
+    const 高 = b._h || 32, 宽 = b._w || 160;
+    // 前面的块如果跟它在两个方向上都重叠，就把它顶下去（可以连着顶好几次）
+    for (let 再 = true; 再;) {
+      再 = false;
+      for (const a of 已放) {
+        const a顶 = a.y || 0, a底 = a顶 + (a._h || 32);
+        const a左 = a.x || 0, a右 = a左 + (a._w || 160);
+        const 竖撞 = 顶 < a底 && a顶 < 顶 + 高;
+        const 横撞 = (b.x || 0) < a右 && a左 < (b.x || 0) + 宽;
+        if (竖撞 && 横撞) { 顶 = a底 + 8; 再 = true; }
+      }
+    }
+    if (顶 !== (b.y || 0)) 动过 = true;
+    b.y = 顶;
+    已放.push(b);
+  }
+  return 动过;
+}
+
+// ---------------- 从托盘拖到画布 ----------------
+// 按住托盘上的块，直接在鼠标位置造一个**真的块**，然后走画布上那套拖动。
+// 这样：
+//   · 拖的时候看到的就是最终那个块，不是一个小标签
+//   · 落进哪个框、拖回托盘扔掉，全都复用现成逻辑，不用另写一套"放下"
+//   · 只点一下不移动，块就落在原地（等于原来那种随手加一块）
+const 落点偏移x = 28;
+const 落点偏移y = 14;
+
+function 挂托盘(c, 类型) {
+  c.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    const 起 = { x: e.clientX, y: e.clientY };
+    let 已建 = false;
+
+    // 在 (cx,cy) 造一个真块 —— 位置要让鼠标落在块的左上角往里一点，
+    // 否则块会整块甩到鼠标右下方去
+    const 造在 = (cx, cy) => {
+      已建 = true;
+      const 块 = 建(类型, 0, 0);
+      根块们.push(块);
+      重画();
+      // 先让它渲染出来，再按真实位置校正一次 ——
+      // 直接拿 cx - world.left 算会有几十像素的偏差（画布边距、块的边框都算进去了）
+      const el0 = 世界.querySelector(`.blk[data-id="${块.id}"]`);
+      if (el0) {
+        const r0 = el0.getBoundingClientRect();
+        块.x = 块.x + (cx - 落点偏移x) - r0.left;
+        块.y = 块.y + (cy - 落点偏移y) - r0.top;
+        重画();
+      }
+      return { 块, el: 世界.querySelector(`.blk[data-id="${块.id}"]`) };
+    };
+
+    const 收 = () => {
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+
+    const 移 = ev => {
+      if (已建) return;
+      if (Math.abs(ev.clientX - 起.x) + Math.abs(ev.clientY - 起.y) < 5) return;
+      收();                                   // 交给 开始拖 自己接管
+      const { 块, el } = 造在(ev.clientX, ev.clientY);
+      if (el) 开始拖(块, el, ev);
+    };
+
+    const 停 = () => {
+      收();
+      if (已建) return;
+      // 没动 = 点一下。丢到画布看得见的地方，不要留在托盘底下
+      const sr = 舞台.getBoundingClientRect();
+      造在(sr.left + sr.width * 0.35, sr.top + sr.height * 0.32);
+    };
+
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+}
+
+// ---------------- 侧栏宽度可拖 ----------------
+(function 挂侧栏拖宽() {
+  const 栏 = document.querySelector('.palette');
+  const 把 = document.createElement('div');
+  把.className = 'palette-grip';
+  栏.appendChild(把);
+  把.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const 起x = e.clientX, 起宽 = 栏.getBoundingClientRect().width;
+    把.classList.add('按着');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const 移 = ev => {
+      const w = Math.max(120, Math.min(460, 起宽 + ev.clientX - 起x));
+      栏.style.width = w + 'px';
+    };
+    const 停 = () => {
+      把.classList.remove('按着');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+})();
+
+// ---------------- 调色板 ----------------
+const 调 = document.getElementById('palette');
+const 按组 = window.Blocks.按组归类();
+
+for (const [组名, 类型们] of Object.entries(按组)) {
+  if (!类型们.length) continue;
+  const 节 = document.createElement('div');
+  节.className = 'grp-sec';
+
+  const h = document.createElement('h2');
+  h.className = 'grp';
+  const 箭 = document.createElement('span');
+  箭.className = 'grp-arrow';
+  箭.textContent = '▾';
+  h.appendChild(箭);
+  h.appendChild(document.createTextNode(组名));
+  h.addEventListener('click', () => 节.classList.toggle('collapsed'));
+
+  const 箱 = document.createElement('div');
+  箱.className = 'chips';
+
+  类型们.forEach(类型 => {
+    const c = document.createElement('div');
+    c.className = 'chip';
+    const 中 = document.createElement('span');
+    中.textContent = 类型;
+    c.appendChild(中);
+    c.title = 类型 + (块定义[类型].英文 ? '  ' + 块定义[类型].英文 : '');
+    if (块定义[类型].英文) {
+      const en = document.createElement('span');
+      en.className = 'en';
+      en.textContent = 块定义[类型].英文;
+      c.appendChild(en);
+    }
+    挂托盘(c, 类型);
+    箱.appendChild(c);
+  });
+
+  节.appendChild(h);
+  节.appendChild(箱);
+  调.appendChild(节);
+}
+
+// 画布自动变大：块拖到边上时不至于被裁掉
+function 自动扩画布() {
+  let 右 = 2400, 下 = 1600;
+  for (const b of 根块们) {
+    const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+    if (!el) continue;
+    右 = Math.max(右, b.x + el.offsetWidth + 160);
+    下 = Math.max(下, b.y + el.offsetHeight + 160);
+  }
+  世界.style.width = 右 + 'px';
+  世界.style.height = 下 + 'px';
+}
+
+// ---------------- 存盘 / 撤销 ----------------
+// 一个「工程」= 一张画布（整棵树，含每个块的坐标和字段）。
+// 工程表存在 localStorage 里，打开时全部读回来；顶栏的标签页对应它。
+const 存档键 = 'zh-editor-工程表';
+let 工程表 = {};          // 名字 → { 块们, 改 }
+let 当前工程 = '';
+let 历史 = [], 历史位 = -1, 正在撤销 = false;
+
+// 布局缓存（_h/_w）不进快照 —— 它们只是渲染产物，混进去会让「看起来没变」也算一次改动
+function 快照() {
+  return JSON.stringify(根块们, (k, v) => (k === '_h' || k === '_w') ? undefined : v);
+}
+
+function 记历史() {
+  if (正在撤销) return;
+  const 现 = 快照();
+  if (历史[历史位] === 现) return;
+  历史 = 历史.slice(0, 历史位 + 1);
+  历史.push(现);
+  if (历史.length > 120) { 历史.shift(); }
+  历史位 = 历史.length - 1;
+}
+
+function 存盘() {
+  try {
+    if (!当前工程) return;
+    工程表[当前工程] = { ...(工程表[当前工程] || {}), 块们: JSON.parse(快照()), 改: Date.now() };
+    localStorage.setItem(存档键, JSON.stringify(工程表));
+  } catch (e) { /* 存不了就算了，不能因此让编辑器挂掉 */ }
+}
+
+function 读盘() {
+  try {
+    const t = localStorage.getItem(存档键);
+    if (!t) return false;
+    const 数据 = JSON.parse(t);
+    if (!数据 || typeof 数据 !== 'object' || Array.isArray(数据)) return false;
+    工程表 = 数据;
+    const 名字 = Object.keys(工程表);
+    if (!名字.length) return false;
+    当前工程 = 名字[0];
+    根块们 = 工程表[当前工程].块们 || [];
+    return true;
+  } catch (e) { return false; }
+}
+
+// ---------- 多工程 ----------
+function 切到工程(名) {
+  if (!工程表[名]) return;
+  存盘();                       // 先把当前这个存一下
+  当前工程 = 名;
+  根块们 = 工程表[名].块们 || [];
+  历史 = []; 历史位 = -1;      // 历史不跨工程，不然撤销会串到别的文件
+  关说明(); 关选项();
+  重画();
+  画标签();
+  刷新本份标签();
+}
+
+function 新工程() {
+  let 名 = '未命名';
+  let i = 2;
+  while (工程表[名]) 名 = '未命名' + (i++);
+  工程表[名] = { 块们: [], 改: Date.now() };
+  切到工程(名);
+}
+
+function 删工程(名) {
+  if (!工程表[名]) return;
+  if (Object.keys(工程表).length <= 1) { alert('至少留一个工程'); return; }
+  if (!confirm('删掉「' + 名 + '」？里面的块就没了。')) return;
+  delete 工程表[名];
+  const 剩下 = Object.keys(工程表);
+  当前工程 = 剩下[0];
+  根块们 = 工程表[当前工程].块们 || [];
+  历史 = []; 历史位 = -1;
+  重画();
+  画标签();
+  存盘();
+}
+
+function 改名工程(旧) {
+  const 新 = prompt('改成什么名字？', 旧);
+  if (!新 || 新 === 旧) return;
+  const 名 = 新.trim();
+  if (!名 || 工程表[名]) { alert('这个名字已经有了'); return; }
+  工程表[名] = 工程表[旧];
+  delete 工程表[旧];
+  if (当前工程 === 旧) 当前工程 = 名;
+  画标签();
+  存盘();
+}
+
+function 画标签() {
+  const 条 = document.getElementById('tabs');
+  if (!条) return;
+  条.textContent = '';
+  for (const 名 of Object.keys(工程表)) {
+    const t = document.createElement('div');
+    t.className = 'tab' + (名 === 当前工程 ? ' active' : '');
+    t.title = '双击改名';
+    const 字 = document.createElement('span');
+    字.textContent = 名;
+    t.appendChild(字);
+    const x = document.createElement('span');
+    x.className = 'x';
+    x.textContent = '✕';
+    x.title = '删掉这个工程';
+    x.addEventListener('pointerdown', e => e.stopPropagation());
+    x.addEventListener('click', e => { e.stopPropagation(); 删工程(名); });
+    t.appendChild(x);
+    t.addEventListener('click', () => 切到工程(名));
+    t.addEventListener('dblclick', () => 改名工程(名));
+    条.appendChild(t);
+  }
+  const 加 = document.createElement('div');
+  加.className = 'tab 新';
+  加.textContent = '＋';
+  加.title = '新建一个工程';
+  加.addEventListener('click', 新工程);
+  条.appendChild(加);
+}
+
+function 撤销() {
+  if (历史位 <= 0) return false;
+  历史位--;
+  正在撤销 = true;
+  try { 根块们 = JSON.parse(历史[历史位]); 重画(); } finally { 正在撤销 = false; }
+  return true;
+}
+
+function 重做() {
+  if (历史位 >= 历史.length - 1) return false;
+  历史位++;
+  正在撤销 = true;
+  try { 根块们 = JSON.parse(历史[历史位]); 重画(); } finally { 正在撤销 = false; }
+  return true;
+}
+
+// ---------------- 重画 ----------------
+let 画序 = 0;
+function 重画() {
+  const 我 = ++画序;
+  悬停存底.clear();
+  // 拖动中的块挂在 document.body 上（见 开始拖），所以清理要扫整个文档，
+  // 只扫 #world 会把那些副本留在页面里，越拖越多。
+  [...document.querySelectorAll('.blk')].forEach(e => e.remove());
+  const 提示 = document.getElementById('hintEmpty');
+  if (提示) 提示.style.display = 根块们.length ? 'none' : 'block';
+
+  for (const b of 根块们) 世界.appendChild(渲染块(b));
+  标孤岛();
+  布局(根块们);
+  // 尺寸定了才知道谁真的压住谁 —— 这一步必须在 布局() 之后
+  if (清全部重叠()) 布局(根块们);
+  记历史();
+  存盘();
+  自动扩画布();
+  输出();
+
+  // 布局只量「叶子块多大、头多高」这两样，而这俩要等字排完才准。
+  // 量它们不会反过来影响容器，所以再算一遍是安全的 —— 不会越算越大。
+  const 再算 = () => { if (我 !== 画序) return; 布局(根块们); 自动扩画布(); };
+  requestAnimationFrame(再算);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(再算);
+}
+
+// 孤岛：放在画布最上层、又不是「类」的块。
+// 它们生成出来会掉在类外面（Unity 编译不过），所以标红提醒。
+const 可顶层 = new Set(['类', '手写一行']);
+function 标孤岛() {
+  let 数 = 0;
+  for (const b of 根块们) {
+    const el = 世界.querySelector(`.blk[data-id="${b.id}"]`);
+    if (!el) continue;
+    const 孤 = !可顶层.has(b.类型);
+    el.classList.toggle('孤岛', 孤);
+    if (孤) 数++;
+  }
+  let 条 = document.getElementById('孤岛提示');
+  if (!条) {
+    条 = document.createElement('div');
+    条.id = '孤岛提示';
+    世界.appendChild(条);
+  }
+  条.className = 数 ? '孤岛提示' : '孤岛提示 hidden';
+  条.textContent = 数 + ' 个块没进类，生成出来会掉在类外面';
+}
+
+// 编译不过的三种常见原因，先在这儿挡一道 —— 比生成出坏代码再回 Unity 看红字强
+function 查问题() {
+  const 问题 = [];
+
+  // ① 顶层两个类同名
+  const 类名 = 根块们.filter(b => b.类型 === '类')
+    .map(b => String(b.字段.名 || '').trim()).filter(Boolean);
+  const 重类 = [...new Set(类名.filter((n, i) => 类名.indexOf(n) !== i))];
+  if (重类.length) 问题.push('有两个类都叫「' + 重类.join('」「') + '」');
+
+  // ② 同一层里同一个变量定义了两遍（CS0128）
+  // 注意：每层各自判重，所以要把「各层的结论」收集起来，不能只用最外层的返回值
+  const 重变 = [];
+  const 查层 = (列表) => {
+    if (!列表 || !列表.length) return;
+    const 名 = [];
+    for (const b of 列表) {
+      if (b.类型 === '定义变量') {
+        const n = String(b.字段.名 || '').trim();
+        if (n) 名.push(n);
+      }
+    }
+    const 重 = [...new Set(名.filter((n, i) => 名.indexOf(n) !== i))];
+    for (const n of 重) 重变.push(n);
+    for (const b of 列表) {
+      查层(b.子);
+      for (const 段 of b.分支 || []) 查层(段.子);
+    }
+  };
+  查层(根块们);
+  if (重变.length) 问题.push('同一层里「' + 重变.join('」「') + '」各定义了两遍');
+
+  // ③ 要输出的东西没加引号 —— 生成 Debug.Log(信息) 就编译不过
+  const 裸文字 = [];
+  (function 找(列表) {
+    for (const b of 列表 || []) {
+      if (b.类型 === '打印' || b.类型 === '警告' || b.类型 === '报错') {
+        const v = String(b.字段.值 || '').trim();
+        if (v && !/^["'].*["']$/.test(v) && /[一-龥]/.test(v)) 裸文字.push(v);
+      }
+      找(b.子);
+      for (const 段 of b.分支 || []) 找(段.子);
+    }
+  })(根块们);
+  if (裸文字.length) 问题.push('「' + 裸文字[0] + '」是文字，要用双引号包起来');
+
+  // ④ 跳出 / 继续 得在循环里；⑤ 返回 要和方法的返回类型对上
+  const 找返回 = (列表) => {
+    for (const b of 列表 || []) {
+      if (b.类型 === '返回') return b;
+      const r = 找返回(b.子) || (b.分支 || []).map(段 => 找返回(段.子)).find(Boolean);
+      if (r) return r;
+    }
+    return null;
+  };
+  const 走 = (列表, 在循环里) => {
+    for (const b of 列表 || []) {
+      if ((b.类型 === '跳出' || b.类型 === '继续') && !在循环里) {
+        问题.push('「' + b.类型 + '」只能放在循环里面，放外面编译不过');
+      }
+      if (b.类型 === '方法') {
+        const 名 = String(b.字段.名 || '未命名');
+        const 有类型 = b.字段.返回什么 && b.字段.返回什么 !== '无返回';
+        const 返 = 找返回(b.子);
+        if (有类型 && !返) 问题.push('方法「' + 名 + '」说了要返回，里面却没有「返回」');
+        if (!有类型 && 返 && String(返.字段.值 || '').trim() && String(返.字段.值 || '').trim() !== '0') {
+          问题.push('方法「' + 名 + '」没写返回类型，但里面「返回」了值 —— 去块上选一下「交回什么东西」');
+        }
+      }
+      const 是循环 = b.类型 === '重复' || b.类型 === '只要' || b.类型 === '遍历';
+      走(b.子, 在循环里 || 是循环);
+      for (const 段 of b.分支 || []) 走(段.子, 在循环里 || 是循环);
+    }
+  };
+  走(根块们, false);
+
+  return 问题;
+}
+
+let 当前代码 = '';
+
+function 输出() {
+  let 代码;
+  try {
+    代码 = 树.生成CSharp(根块们) || '// 左边点块，右边出代码';
+  } catch (e) {
+    代码 = '// 生成失败：' + e.message;
+  }
+  当前代码 = 代码;
+
+  const 行们 = 代码.split(String.fromCharCode(10));
+  const 片 = document.createDocumentFragment();
+  行们.forEach((文, i) => {
+    const 行 = document.createElement('div');
+    行.className = 'ln';
+    行.dataset.行 = i + 1;
+    const 号 = document.createElement('span');
+    号.className = 'no';
+    号.textContent = i + 1;
+    const 字 = document.createElement('span');
+    字.className = 'tx';
+    字.textContent = 文 || ' ';
+    行.appendChild(号);
+    行.appendChild(字);
+    片.appendChild(行);
+  });
+  out.textContent = '';
+  out.appendChild(片);
+  标错行();
+
+  const 问题 = 查问题();
+  if (问题.length) {
+    警告.textContent = '⚠ ' + 问题.join('　·　');
+    警告.classList.remove('hidden');
+  } else {
+    警告.classList.add('hidden');
+  }
+
+  排编译检查();
+}
+
+// ---------------- 真编译检查（像 VS 那样报） ----------------
+let 编译结果 = [];        // [{严重, 行, 列, 码, 说}]
+let 检查定时 = 0;
+
+function 排编译检查() {
+  const 条 = document.getElementById('errCount');
+  if (!有壳()) {
+    if (条) { 条.textContent = '（网页版不做编译检查，用 exe 才有）'; 条.className = 'errcount'; }
+    return;
+  }
+  clearTimeout(检查定时);
+  检查定时 = setTimeout(() => {
+    window.chrome.webview.postMessage({ 命令: '编译检查', 代码: 当前代码 });
+  }, 700);
+}
+
+function 标错行() {
+  const 行们 = out.querySelectorAll('.ln');
+  行们.forEach(l => l.classList.remove('bad', 'warn2'));
+  let 错数 = 0, 警数 = 0;
+  for (const e of 编译结果) {
+    const l = out.querySelector('.ln[data-行="' + e.行 + '"]');
+    if (!l) continue;
+    if (e.严重 === '错误') { l.classList.add('bad'); 错数++; }
+    else { l.classList.add('warn2'); 警数++; }
+  }
+  const 条 = document.getElementById('errCount');
+  if (条) {
+    条.className = 'errcount' + (错数 ? ' 有错' : '');
+    条.textContent = 错数 ? '✕ ' + 错数 + ' 个错误' + (警数 ? '　⚠ ' + 警数 : '')
+                        : (警数 ? '⚠ ' + 警数 + ' 个警告' : '✓ 编译通过');
+  }
+
+  const 板 = document.getElementById('errs');
+  板.textContent = '';
+  if (!编译结果.length) { 板.classList.add('hidden'); return; }
+  板.classList.remove('hidden');
+  for (const e of 编译结果) {
+    const 项 = document.createElement('div');
+    项.className = 'err' + (e.严重 === '警告' ? ' 警' : '');
+    const 码 = document.createElement('span'); 码.className = '码'; 码.textContent = e.码;
+    const 位 = document.createElement('span'); 位.className = '位'; 位.textContent = e.行 + ':' + e.列;
+    const 说 = document.createElement('span'); 说.className = '说'; 说.textContent = e.说;
+    项.appendChild(码); 项.appendChild(位); 项.appendChild(说);
+    项.addEventListener('click', () => 跳行(e.行));
+    板.appendChild(项);
+  }
+}
+
+function 跳行(n) {
+  const l = out.querySelector('.ln[data-行="' + n + '"]');
+  if (!l) return;
+  l.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  l.classList.add('闪');
+  setTimeout(() => l.classList.remove('闪'), 900);
+}
+
+document.getElementById('copyBtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(当前代码);
+    const b = document.getElementById('copyBtn');
+    const 旧 = b.textContent; b.textContent = '已复制 ✓';
+    setTimeout(() => b.textContent = 旧, 1200);
+  } catch { alert('复制失败，手动选中右侧代码'); }
+};
+document.getElementById('clearBtn').onclick = () => { 根块们 = []; 重画(); };  // 只管当前这张画布
+
+// ---------------- 存到 Unity ----------------
+// 整份覆盖写，不是追加 —— 同一张画布改十次，文件里永远只有这一份。
+// 只有 exe 里才有写盘通道；网页版退回成「下载文件」。
+function 有壳() {
+  return !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage);
+}
+
+function 找类名() {
+  const 出处 = 树.生成CSharp(根块们) || '';
+  const m = 出处.match(/public class\s+(\S+)/);
+  return m ? m[1] : '';
+}
+
+function 存到Unity() {
+  const 代码 = 当前代码 || '';
+  if (!代码.trim() || 代码.startsWith('//')) { alert('画布还是空的，没什么可存'); return; }
+  const 名 = (找类名() || 当前工程 || '未命名') + '.cs';
+
+  if (有壳()) {
+    const 上一次 = (工程表[当前工程] && 工程表[当前工程].存到) || '';
+    window.chrome.webview.postMessage({ 命令: '存到Unity', 文件名: 名, 内容: 代码, 上次路径: 上一次 });
+    return;
+  }
+  // 网页版：下载出去，自己拖进 Unity
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([代码], { type: 'text/plain;charset=utf-8' }));
+  a.download = 名;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+document.getElementById('saveUnityBtn').onclick = 存到Unity;
+
+// Unity 目录显示在这 —— 不点「存到 Unity」也能看到现在存去哪儿，点一下能换
+function 刷新目录标签(路) {
+  const el = document.getElementById('unityDir');
+  if (!el) return;
+  el.dataset.路径 = 路 || '';
+  el.classList.toggle('设过', !!路);
+  el.textContent = 路 ? 'Unity 目录：' + 路 : 'Unity 目录：未设（点这里选）';
+  el.title = 路 ? 路 + '（点一下换一个）' : '点一下选 Unity 项目的 Assets 文件夹';
+}
+
+function 刷新本份标签() {
+  const el = document.getElementById('curFile');
+  if (!el) return;
+  const 项 = 工程表[当前工程] || {};
+  const 路 = 项.存到 || '';
+  if (!路) { el.textContent = '本份：还没存过'; el.title = '点「存到 Unity」之后这里会显示它存到哪个文件'; return; }
+  el.textContent = '本份：' + (项.相对 || 路);
+  el.title = '完整路径：' + 路;
+}
+
+document.getElementById('engineDir').onclick = () => {
+  if (!有壳()) { alert('网页版做不了编译检查'); return; }
+  window.chrome.webview.postMessage({ 命令: '选引擎目录' });
+};
+
+function 刷新引擎标签(路) {
+  const el = document.getElementById('engineDir');
+  if (!el) return;
+  el.classList.toggle('设过', !!路);
+  const 斜 = String.fromCharCode(92);
+  if (路) {
+    const 段 = 路.split(斜);
+    el.textContent = '引擎：' + 段.slice(-4).join(斜);
+  } else {
+    el.textContent = '引擎：没找到（点这里选）';
+  }
+  el.title = 路 || '点一下选 Unity 安装目录里的 Editor / Data / Managed';
+}
+
+document.getElementById('unityDir').onclick = () => {
+  if (!有壳()) { alert('网页版写不了磁盘 —— 用 exe 才能直接存到 Unity'); return; }
+  window.chrome.webview.postMessage({ 命令: '换目录' });
+};
+
+if (有壳()) window.chrome.webview.postMessage({ 命令: '问目录' });
+
+if (有壳()) {
+  window.chrome.webview.addEventListener('message', e => {
+    const d = e.data;
+    if (!d || !d.命令) return;
+    const 按钮 = document.getElementById('saveUnityBtn');
+    if (d.命令 === '存好了') {
+      if (工程表[当前工程]) {
+        工程表[当前工程].存到 = d.路径;
+        工程表[当前工程].相对 = d.相对 || '';
+        存盘();
+      }
+      刷新本份标签();
+      const 旧 = 按钮.textContent;
+      按钮.textContent = '已存 ' + d.文件名;
+      按钮.title = d.路径 + (d.说明 ? '（' + d.说明 + '）' : '');
+      setTimeout(() => { 按钮.textContent = 旧; }, 1800);
+    } else if (d.命令 === '编译结果') {
+      编译结果 = Array.isArray(d.列表) ? d.列表 : [];
+      const 条 = document.getElementById('errCount');
+      if (条) 条.title = d.诊断 || '';
+      刷新引擎标签(d.引擎);
+      标错行();
+    } else if (d.命令 === '引擎目录') {
+      刷新引擎标签(d.路径);
+    } else if (d.命令 === '目录') {
+      刷新目录标签(d.路径 || '');
+    } else if (d.命令 === '出错') {
+      alert('没存进去：' + d.说);
+    }
+  });
+}
+
+document.getElementById('undoBtn').onclick = () => 撤销();
+document.getElementById('redoBtn').onclick = () => 重做();
+
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;   // 输入框里的撤销留给浏览器
+  if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); e.shiftKey ? 重做() : 撤销(); }
+  else if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); 重做(); }
+});
+
+// 有存档就接着上次；没有就建一个空的
+if (!读盘()) {
+  当前工程 = '未命名';
+  工程表[当前工程] = { 块们: [], 改: Date.now() };
+  根块们 = [];
+}
+画标签();
+刷新本份标签();
+重画();
+</script>
+</body>
+</html>
