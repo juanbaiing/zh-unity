@@ -2393,7 +2393,7 @@ function 开始拖(b, el, 起始) {
 
           根块们 = 根块们.filter(x => x !== b);
           // 找这个盒属于哪个列表（子 or 某分支）
-          收进(宿主位.块, b);
+          收进(悬停盒, 宿主位.块, b);
           收下了 = true;
         }
       }
@@ -2414,9 +2414,18 @@ function 开始拖(b, el, 起始) {
   document.addEventListener('pointerup', 停);
 }
 
-// 把一个块塞进宿主（判断是哪一层的盒子）
-function 收进(宿主, b) {
-  宿主.子.push(b);
+// 把一个块塞进宿主。
+// ⚠ 不能一律 push 到 .子 —— 盒可能是「否则若/否则」那一段的内容区，
+//   那样块会跑到主内容区去，看起来就是「从属关系乱了」。
+function 收进(盒, 宿主块, b) {
+  const 段el = 盒 && 盒.parentElement;
+  if (段el && 段el.classList && 段el.classList.contains('branch')) {
+    const 段们 = [...段el.parentElement.querySelectorAll(':scope > .branch')];
+    const i = 段们.indexOf(段el);
+    const 段 = i >= 0 ? (宿主块.分支 || [])[i] : null;
+    if (段) { 段.子.push(b); return; }
+  }
+  宿主块.子.push(b);
 }
 
 // 松手时把重叠的块往下推 —— 这样「插到中间」不用自己挪位置，
@@ -2764,7 +2773,8 @@ function 重画(跳过重叠整理) {
   // ⚠ 但拖放中途那几次重画不能做：新块刚建出来还在临时位置，
   //   会被当成挡路的，把旁边的块全推走 —— 这就是「拖着拖着别人跑了」。
   if (!跳过重叠整理 && 清全部重叠()) 布局(根块们);
-  记历史();
+  // 拖放中途的临时重画也不进历史 —— 否则拖一次会记好几条，撤销一次退不回去
+  if (!跳过重叠整理) 记历史();
   存盘();
   自动扩画布();
   输出();
