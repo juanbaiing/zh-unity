@@ -122,6 +122,13 @@
   .ctl.问{font-weight:bold;font-size:12px;padding:0 5px}
   .ctl.问:hover{color:var(--cn)}
 
+  .简介卡{position:fixed;z-index:9997;pointer-events:none;max-width:260px;
+    padding:6px 10px;background:#1c232e;border:1px solid #364253;
+    border-radius:6px;box-shadow:0 6px 20px #000a;
+    font-size:11.5px;line-height:1.6;color:#c3ccd8;white-space:normal}
+  .简介卡 b{color:var(--cn);font-weight:normal;margin-right:6px}
+  .简介卡 b::after{content:'·';color:#4a5568;margin-left:6px}
+
   .说明卡{position:fixed;z-index:9999;max-width:330px;padding:10px 13px;
     background:#1a2029;border:1px solid #2f3a49;border-left:3px solid var(--cn);
     border-radius:7px;box-shadow:0 10px 30px #000b;
@@ -1007,6 +1014,55 @@ const 块说明 = {
   '手写一行': '上面这些块没有的写法，就在这儿直接敲。\n中文套式和 C# 都认。',
 };
 
+// 托盘里悬停显示的一句话 —— 不求全，只求「扫一眼就知道这大概是干嘛的」。
+// 措辞参照微软 C# 语言参考和 Unity 手册里的标准说法，再压成一句。
+const 块简介 = {
+  '类': '把数据和行为打包成一个盒子；Unity 里一个脚本就是一个类。',
+  '字段': '属于整个对象的变量，加了「公开」就能在 Unity 检视面板里直接改。',
+  '属性': '看起来像字段，但读写能加规则，比如血量不许变负。',
+  '方法': '一段起了名字的代码，什么时候想用就喊它一次。',
+  '构造函数': '造对象时自动跑一次，用来把初始状态摆好。',
+  '新建对象': '用 new 照类创建出一个实例，同时会跑一次构造函数。',
+  '定义变量': '只在当前这个方法里活着的临时变量，方法跑完就没了。',
+  '改变量': '把变量的值换成新的，或者按加减乘除在原值上改。',
+  '调用': '执行别处写好的方法。',
+  '随机数': '摇一个指定范围内的随机整数。',
+  '打印': '往控制台输出一行字，最常用的查错手段。',
+  '返回': '把结果交回给调用方，并立刻结束这个方法。',
+  '设若': '条件成立才执行框里的内容。',
+  '否则若': '上面那个条件不成立时，再判一个新的条件。',
+  '否则': '前面几条都不成立时走这里。',
+  '多分支': '拿一个值去跟下面几种情况挨个比对。',
+  '遇': '多分支里的某一种情况：值等于它就执行。',
+  '其他': '多分支里一种都没对上时走这里。',
+  '重复': '按固定次数做若干遍。',
+  '只要': '条件还成立就一直做，圈数事先不定。',
+  '遍历': '把集合里的元素一个个取出来处理。',
+  '跳出': '立刻结束当前这一层循环。',
+  '继续': '跳过本轮剩下的部分，直接开始下一轮。',
+  '数组': '长度固定的同类型元素序列，靠下标取。',
+  '新建列表': '长度可变的动态数组，能随时加和删。',
+  '添加': '往列表末尾加一个元素。',
+  '删除': '按下标删掉列表里的某个元素。',
+  '清空': '把列表里的元素全部清掉。',
+  '获得组件': '从当前物体身上取出某个组件来用。',
+  '读按键': '判断玩家按没按某个键，按住就执行框里的内容。',
+  '实例化': '按预制体复制出一个新物体，相当于 Unity 版的 new。',
+  '销毁': '把物体从场景里删掉。',
+  '设置激活': '把物体显示或隐藏，子物体会跟着一起。',
+  '平移': '让物体沿某个方向挪一段距离。',
+  '转动': '让物体绕某个轴转一个角度。',
+  '切换场景': '加载另一个场景，或者重开当前场景。',
+  '设属性': '给某个组件的属性赋一个新值。',
+  '取属性': '把某个组件的属性读出来存进变量。',
+  '调对象方法': '让某个组件执行它的某个方法。',
+  '警告': '往控制台输出一条黄色警告，不中断运行。',
+  '报错': '往控制台输出一条红色错误。',
+  '尝试': '把可能出错的代码放这里，出错不会当场崩。',
+  '捕获': '上面出错之后跳到这里继续，用来兜底。',
+  '手写一行': '直接敲一行原生 C# 或中文套式。',
+};
+
 const 块定义 = {
 
   // ================= ① 骨架：定义你的东西有哪些 =================
@@ -1534,7 +1590,7 @@ function 生成CSharp(块树) {
   return 译(中文);
 }
 
-const 出口 = { 块定义, 块说明, 新块, 生成中文, 生成CSharp, 收集选项, 按组归类, 分组顺序 };
+const 出口 = { 块定义, 块说明, 块简介, 新块, 生成中文, 生成CSharp, 收集选项, 按组归类, 分组顺序 };
 
 if (typeof window !== 'undefined') window.Blocks = 出口;
 if (typeof module !== 'undefined') module.exports = 出口;
@@ -1980,6 +2036,52 @@ document.addEventListener('pointerdown', e => {
   if (e.target.classList && e.target.classList.contains('选')) return;
   关选项();
 }, true);
+
+// ---------------- 托盘简介 ----------------
+// 鼠标停在托盘里的块上，弹一句「它是干嘛的」。
+// 和块上的 ? 那个说明卡是两回事：那个是详细版，这个是扫一眼的。
+let 简介卡 = null, 简介锚 = null;
+
+function 关简介() {
+  if (简介卡) 简介卡.remove();
+  简介卡 = null;
+  简介锚 = null;
+}
+
+function 显示简介(类型, 锚) {
+  const 文 = (window.Blocks.块简介 || {})[类型];
+  if (!文) return;
+  关简介();
+
+  const 卡 = document.createElement('div');
+  卡.className = '简介卡';
+  const 名 = document.createElement('b');
+  名.textContent = 类型;
+  卡.appendChild(名);
+  const 句 = document.createElement('span');
+  句.textContent = 文;
+  卡.appendChild(句);
+  document.body.appendChild(卡);
+
+  // 贴着块的右边弹；右边放不下就翻到左边
+  const r = 锚.getBoundingClientRect();
+  const kr = 卡.getBoundingClientRect();
+  let 左 = r.right + 8;
+  if (左 + kr.width > window.innerWidth - 8) 左 = Math.max(8, r.left - kr.width - 8);
+  let 上 = r.top + r.height / 2 - kr.height / 2;
+  上 = Math.min(Math.max(8, 上), window.innerHeight - kr.height - 8);
+  卡.style.left = Math.round(左) + 'px';
+  卡.style.top = Math.round(上) + 'px';
+
+  简介卡 = 卡;
+  简介锚 = 锚;
+}
+
+// 滚动托盘时浮框要跟着走 —— 关掉再弹会闪，直接重算位置
+document.addEventListener('scroll', () => {
+  if (简介卡 && 简介锚) 显示简介(简介锚.dataset.t || '', 简介锚);
+}, true);
+window.addEventListener('resize', 关简介);
 
 // ---------------- 说明浮层 ----------------
 // 点块上的 ? 弹出这块的说明。做成浮层而不是往块里塞——
@@ -2592,7 +2694,10 @@ for (const [组名, 类型们] of Object.entries(按组)) {
     const 中 = document.createElement('span');
     中.textContent = 类型;
     c.appendChild(中);
-    c.title = 类型 + (块定义[类型].英文 ? '  ' + 块定义[类型].英文 : '');
+    c.dataset.t = 类型;
+    c.title = 类型 + (块定义[类型].英文 ? '  ' + 块定义[类型].英文 : '');   // 兜底，给看不了自绘浮框的场合
+    c.addEventListener('mouseenter', () => 显示简介(类型, c));
+    c.addEventListener('mouseleave', 关简介);
     if (块定义[类型].英文) {
       const en = document.createElement('span');
       en.className = 'en';
