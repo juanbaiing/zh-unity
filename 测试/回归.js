@@ -52,8 +52,8 @@ const 连=()=>new Promise((res,rej)=>{http.get('http://127.0.0.1:9223/json/list'
   判('生成正常', 代码&&代码.includes('public class'), (代码||'').slice(0,20));
   判('编译检查有结果', 状态&&状态.length>0, 状态);
 
-  // E. 多工程标签
-  await 求值(`新工程(); 'ok'`);
+  // E. 多工程标签（先清干净，前面的场景会留下工程）
+  await 求值(`localStorage.clear(); 工程表={}; 当前工程=''; 新工程(); 新工程(); 'ok'`);
   await 睡1(400);
   const 标签数=await 求值(`document.querySelectorAll('.tab:not(.新)').length`);
   判('新建工程', 标签数===2, '标签数 '+标签数);
