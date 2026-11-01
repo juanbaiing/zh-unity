@@ -183,6 +183,20 @@
   .code{width:38%;flex:none;border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
   .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);
     border-bottom:1px solid var(--line);background:var(--panel)}
+  /* 中间层：块和 C# 之间的那一层。默认折叠，不挡主角；
+     但标题一直在，让人知道有这东西可以点开看 */
+  .mid{flex:none;border-bottom:1px solid var(--line);background:#131820}
+  .mid > summary{padding:5px 10px;font-size:11px;color:#6b7688;cursor:pointer;
+    user-select:none;list-style:none}
+  .mid > summary::-webkit-details-marker{display:none}
+  .mid > summary::before{content:'▸ ';color:#4a5568}
+  .mid[open] > summary::before{content:'▾ '}
+  .mid[open] > summary{color:var(--cn);border-bottom:1px dashed #232a36}
+  .mid > summary:hover{color:var(--text)}
+  .mid > pre{margin:0;padding:8px 10px;max-height:30vh;overflow:auto;
+    font-size:11.5px;line-height:1.6;white-space:pre;color:#a8b8a0;
+    background:#10151c;user-select:text}
+
   .codelines{margin:0;padding:6px 0;overflow:auto;flex:1;
     font-size:11.5px;line-height:1.55;white-space:pre;
     font-family:inherit;user-select:text}
@@ -243,6 +257,10 @@
   </section>
 
   <section class="code">
+    <details class="mid" id="midLayer">
+      <summary>中间层 · 这一堆块对应的写法（点开对照）</summary>
+      <pre id="midOut"></pre>
+    </details>
     <div class="title">生成的 C#<span id="errCount" class="errcount"></span></div>
     <div class="codelines" id="out"></div>
     <div class="warn hidden" id="warn"></div>
@@ -1453,6 +1471,14 @@ function 输出() {
     代码 = '// 生成失败：' + e.message;
   }
   当前代码 = 代码;
+
+  // 中间层：块经「中文转写」出来的样子，跟下面的 C# 是同一件事的两种写法
+  const 中 = document.getElementById('midOut');
+  if (中) {
+    let 中间;
+    try { 中间 = 树.生成(根块们); } catch (e) { 中间 = '// 生成失败：' + e.message; }
+    中.textContent = 中间 || '// 画布是空的';
+  }
 
   const 行们 = 代码.split(String.fromCharCode(10));
   const 片 = document.createDocumentFragment();
