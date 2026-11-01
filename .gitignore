@@ -24,3 +24,10 @@ _*.html
 # 系统
 Thumbs.db
 .DS_Store
+
+# 调试临时文件
+_*.js
+_*.html
+_*.ps1
+_*.png
+_截屏-*.png
