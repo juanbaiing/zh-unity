@@ -262,6 +262,7 @@
   <span id="engineDir" class="dirchip" title="编译检查要用的引擎目录">引擎：自动找</span>
   <span id="unityDir" class="dirchip" title="设置不了">Unity 目录：未设</span>
   <button id="saveUnityBtn" title="直接写进 Unity 项目的 Assets 目录（整份覆盖）">存到 Unity</button>
+  <button id="scanBtn" title="扫一遍 Unity 项目：有哪些脚本、场景、预制体，谁挂在哪个物体上">扫描项目</button>
   <button id="copyBtn">复制 C#</button>
   <button id="clearBtn">清空</button>
 </header>
@@ -3373,6 +3374,15 @@ function 存到Unity() {
 
 document.getElementById('saveUnityBtn').onclick = 存到Unity;
 
+// 扫一遍 Unity 项目。结果存在 window.项目数据 里，后面关系图要用。
+window.项目数据 = null;
+document.getElementById('scanBtn').onclick = () => {
+  if (!有壳()) { alert('要在 exe 里才能扫项目'); return; }
+  const b = document.getElementById('scanBtn');
+  b.textContent = '扫描中…';
+  window.chrome.webview.postMessage({ 命令: '扫描项目' });
+};
+
 // Unity 目录显示在这 —— 不点「存到 Unity」也能看到现在存去哪儿，点一下能换
 function 刷新目录标签(路) {
   const el = document.getElementById('unityDir');
@@ -3443,6 +3453,13 @@ if (有壳()) {
       标错行();
     } else if (d.命令 === '引擎目录') {
       刷新引擎标签(d.路径);
+    } else if (d.命令 === '项目扫描') {
+      window.项目数据 = d;
+      const b = document.getElementById('scanBtn');
+      if (b) b.textContent = '扫描项目';
+      console.log('[扫描] 脚本', d.脚本.length, '场景', d.场景.length,
+        '预制', d.预制.length, '实例', d.实例们.length);
+      console.log('[扫描] 实例明细', d.实例们);
     } else if (d.命令 === '目录') {
       刷新目录标签(d.路径 || '');
     } else if (d.命令 === '出错') {

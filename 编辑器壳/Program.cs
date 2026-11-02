@@ -148,6 +148,144 @@ namespace ZhEditorShell
         }
 
         // 真编译一遍（不生成文件），把编译器的错原样报回来 —— 跟 VS 里看到的是同一套
+        // 递归找文件，但进目录时就跳过 Library / Temp / obj ——
+        // 用 Directory.GetFiles(AllDirectories) 的话会先把 Library 几万个文件全走一遍，卡死。
+        private static List<string> 递归找(string 底, string 模式, string[] 跳过)
+        {
+            var 结果 = new List<string>();
+            var 栈 = new Stack<string>();
+            栈.Push(底);
+            while (栈.Count > 0)
+            {
+                var 当前 = 栈.Pop();
+                try
+                {
+                    foreach (var d in Directory.GetDirectories(当前))
+                    {
+                        var n = Path.GetFileName(d);
+                        if (System.Array.IndexOf(跳过, n) >= 0) continue;
+                        栈.Push(d);
+                    }
+                    foreach (var f in Directory.GetFiles(当前, 模式)) 结果.Add(f);
+                }
+                catch { /* 没权限的目录跳过 */ }
+            }
+            结果.Sort(StringComparer.Ordinal);
+            return 结果;
+        }
+
+        // ---- 从 .cs 里抠出 public 字段名 ----
+        private static readonly System.Text.RegularExpressions.Regex 字段正则 =
+            new(@"public\s+(?:static\s+|readonly\s+)*(?:[\w.]+(?:<[^>]*>)?(?:\[\])?)\s+(\w+)\s*[=;]",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static Dictionary<string, HashSet<string>> 各脚本字段(string 资源目录, IEnumerable<string> 脚本们)
+        {
+            var 表 = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var 相对 in 脚本们)
+            {
+                var 全 = Path.Combine(资源目录, 相对.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(全)) continue;
+                var 文 = File.ReadAllText(全);
+                var 名 = Path.GetFileNameWithoutExtension(全);
+                var 集 = new HashSet<string>(StringComparer.Ordinal);
+                foreach (System.Text.RegularExpressions.Match m in 字段正则.Matches(文))
+                {
+                    var f = m.Groups[1].Value;
+                    // 后面跟括号的是方法，不是字段
+                    if (System.Text.RegularExpressions.Regex.IsMatch(文, @"" + f + @"\s*\(")) continue;
+                    集.Add(f);
+                }
+                表[名] = 集;
+            }
+            return 表;
+        }
+
+        // ---- 从场景 / 预制体里抠出「哪个物体挂了哪个脚本」----
+        // ⚠️ 团结引擎的 GUID 是两套：.meta 里是 base64，场景里是 32 位 hex，
+        // 对不上（Library/ArtifactDB 里也只有 hex 索引，没有到 base64 的映射）。
+        // 所以改用「字段名反推」：MonoBehaviour 块里存着脚本的公开字段，
+        // 拿这堆字段名去比对每个脚本的公开字段，能全覆盖的就是它。
+        private static List<object> 解析实例(string 项目根, string 资源目录,
+            List<string> 场景们, List<string> 预制们)
+        {
+            var 结果 = new List<object>();
+            var 字段表 = 各脚本字段(资源目录, Directory.GetFiles(资源目录, "*.cs", SearchOption.AllDirectories)
+                .Select(p => p.Substring(资源目录.Length).TrimStart('\\', '/').Replace('\\', '/')));
+
+            foreach (var 相对 in 场景们.Concat(预制们))
+            {
+                var 全 = Path.Combine(项目根, 相对.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(全)) continue;
+                string 文;
+                try { 文 = File.ReadAllText(全); } catch { continue; }
+
+                var 片段们 = System.Text.RegularExpressions.Regex.Split(文, @"^--- ", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+                // 先把 GameObject 的 fileID → 名字、tag 记下来
+                var 物体名 = new Dictionary<string, string>();
+                var 物体Tag = new Dictionary<string, string>();
+                foreach (var 段 in 片段们)
+                {
+                    if (!段.StartsWith("!u!1 ")) continue;
+                    var id = System.Text.RegularExpressions.Regex.Match(段, @"&(\d+)").Groups[1].Value;
+                    var n = System.Text.RegularExpressions.Regex.Match(段, @"^  m_Name: (.*)$",
+                        System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value.Trim();
+                    var t = System.Text.RegularExpressions.Regex.Match(段, @"^  m_TagString: (.*)$",
+                        System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value.Trim();
+                    if (id != "") { 物体名[id] = n; 物体Tag[id] = t; }
+                }
+
+                // 再扫 MonoBehaviour
+                var 组件们 = new Dictionary<string, List<object>>();   // 物体 id → 组件列表
+                foreach (var 段 in 片段们)
+                {
+                    if (!段.StartsWith("!u!114 ")) continue;
+                    var 主 = System.Text.RegularExpressions.Regex.Match(段, @"m_GameObject: \{fileID: (\d+)\}");
+                    if (!主.Success) continue;
+                    var 物id = 主.Groups[1].Value;
+
+                    // 这一块的字段（顶格两空格的 key），排除 m_ 开头的引擎字段
+                    var 字段 = new HashSet<string>(StringComparer.Ordinal);
+                    var 值们 = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (System.Text.RegularExpressions.Match kv in
+                        System.Text.RegularExpressions.Regex.Matches(段, @"^  (?!m_)(\w+): *(.*)$",
+                            System.Text.RegularExpressions.RegexOptions.Multiline))
+                    {
+                        字段.Add(kv.Groups[1].Value);
+                        var v = kv.Groups[2].Value.Trim();
+                        if (v != "") 值们[kv.Groups[1].Value] = v;
+                    }
+
+                    string 匹配 = null;
+                    string 备注 = null;
+                    if (字段.Count > 0)
+                    {
+                        var 候选 = 字段表.Where(kv => 字段.IsSubsetOf(kv.Value)).Select(kv => kv.Key).ToList();
+                        if (候选.Count == 1) 匹配 = 候选[0];
+                        else if (候选.Count > 1) { 匹配 = 候选[0]; 备注 = "可能是：" + string.Join(" / ", 候选); }
+                        else 备注 = "没有脚本能对上这组字段：" + string.Join(",", 字段);
+                    }
+                    else 备注 = "这个组件没有公开字段，认不出来";
+
+                    if (!组件们.ContainsKey(物id)) 组件们[物id] = new List<object>();
+                    组件们[物id].Add(new { 脚本 = 匹配, 字段 = 值们, 备注 });
+                }
+
+                foreach (var kv in 组件们)
+                {
+                    结果.Add(new
+                    {
+                        文件 = 相对,
+                        物体 = 物体名.TryGetValue(kv.Key, out var nm) ? nm : "（无名字）",
+                        tag = 物体Tag.TryGetValue(kv.Key, out var tg) ? tg : "",
+                        组件 = kv.Value,
+                    });
+                }
+            }
+            return 结果;
+        }
+
         private static List<object> 编译检查(string 代码)
         {
             var 错 = new List<object>();
@@ -305,6 +443,41 @@ namespace ZhEditorShell
                                 };
                                 if (框.ShowDialog() == DialogResult.OK) 存引擎目录(框.SelectedPath);
                                 回话(网页, new { 命令 = "引擎目录", 路径 = 找引擎目录() });
+                                return;
+                            }
+
+                            // 扫描一遍 Unity 项目：有哪些脚本、场景、预制体。
+                            // 关系图要靠这个，不然就是空的。
+                            if (命令 == "扫描项目")
+                            {
+                                try
+                                {
+                                    var 资源 = 读目录();
+                                    if (资源 == null)
+                                    {
+                                        回话(网页, new { 命令 = "出错", 说 = "还没选 Assets 目录" });
+                                        return;
+                                    }
+                                    // 选的是 Assets，项目根是它的上一级（那里有 ProjectSettings）
+                                    var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
+                                    string 取相对(string 全, string 底) =>
+                                        全.Substring(底.Length).TrimStart('\\', '/').Replace('\\', '/');
+
+                                    // 进目录时就跳过 Library / Temp / obj。
+                                    // 直接 GetFiles(AllDirectories) 会先把 Library 几万个文件走一遍，卡死。
+                                    var 跳过 = new[] { "Library", "Temp", "obj", "Logs", "UserSettings", ".git", ".vs" };
+                                    var 脚本 = 递归找(资源, "*.cs", 跳过).Select(p => 取相对(p, 资源)).ToList();
+                                    var 场景 = 递归找(项目根, "*.unity", 跳过).Select(p => 取相对(p, 项目根)).ToList();
+                                    var 预制 = 递归找(项目根, "*.prefab", 跳过).Select(p => 取相对(p, 项目根)).ToList();
+
+                                    var 实例们 = 解析实例(项目根, 资源, 场景, 预制);
+                                    回话(网页, new { 命令 = "项目扫描", 项目根, 资源目录 = 资源,
+                                        脚本, 场景, 预制, 实例们 });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "扫描失败：" + ex.Message });
+                                }
                                 return;
                             }
 
