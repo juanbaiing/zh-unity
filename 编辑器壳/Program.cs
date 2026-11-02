@@ -450,6 +450,9 @@ namespace ZhEditorShell
                             // 关系图要靠这个，不然就是空的。
                             if (命令 == "扫描项目")
                             {
+                                var 日志路径 = Path.Combine(Path.GetTempPath(), "zh-scan.log");
+                                void 记(string 话) { try { File.AppendAllText(日志路径, DateTime.Now.ToString("HH:mm:ss.fff") + " " + 话 + "\n"); } catch { } }
+                                记("收到扫描命令");
                                 try
                                 {
                                     var 资源 = 读目录();
@@ -466,16 +469,24 @@ namespace ZhEditorShell
                                     // 进目录时就跳过 Library / Temp / obj。
                                     // 直接 GetFiles(AllDirectories) 会先把 Library 几万个文件走一遍，卡死。
                                     var 跳过 = new[] { "Library", "Temp", "obj", "Logs", "UserSettings", ".git", ".vs" };
+                                    记("开始扫脚本");
                                     var 脚本 = 递归找(资源, "*.cs", 跳过).Select(p => 取相对(p, 资源)).ToList();
+                                    记($"脚本 {脚本.Count}");
                                     var 场景 = 递归找(项目根, "*.unity", 跳过).Select(p => 取相对(p, 项目根)).ToList();
+                                    记($"场景 {场景.Count}");
                                     var 预制 = 递归找(项目根, "*.prefab", 跳过).Select(p => 取相对(p, 项目根)).ToList();
+                                    记($"预制 {预制.Count}");
 
+                                    记($"扫完：脚本{脚本.Count} 场景{场景.Count} 预制{预制.Count}");
                                     var 实例们 = 解析实例(项目根, 资源, 场景, 预制);
+                                    记($"解析出实例 {实例们.Count} 个，准备回话");
                                     回话(网页, new { 命令 = "项目扫描", 项目根, 资源目录 = 资源,
                                         脚本, 场景, 预制, 实例们 });
+                                    记("回话已发");
                                 }
                                 catch (Exception ex)
                                 {
+                                    记("炸了：" + ex.Message);
                                     回话(网页, new { 命令 = "出错", 说 = "扫描失败：" + ex.Message });
                                 }
                                 return;

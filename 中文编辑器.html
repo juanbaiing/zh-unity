@@ -3463,7 +3463,16 @@ if (有壳()) {
     } else if (d.命令 === '目录') {
       刷新目录标签(d.路径 || '');
     } else if (d.命令 === '出错') {
-      alert('没存进去：' + d.说);
+      // ⚠️ 别用 alert。它会阻塞整个页面，一个错误就把界面卡死，
+      // 连「再点一次」都点不了。写成右上角的提示条就行。
+      console.error('[出错]', d.说);
+      const 条 = document.createElement('div');
+      条.textContent = '✗ ' + d.说;
+      条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
+        'background:#2a1414;color:#ff9a9a;border:1px solid #442020;border-radius:6px;' +
+        'padding:7px 12px;font-size:11.5px;max-width:360px';
+      document.body.appendChild(条);
+      setTimeout(() => 条.remove(), 5000);
     }
   });
 }
