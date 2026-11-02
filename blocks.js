@@ -608,7 +608,7 @@ function 生成中文(块树) {
   if (有类 && !已写使用) 头.push('使用 UnityEngine');
   if (用到('切换场景')) 头.push('使用 UnityEngine.SceneManagement');
   if (用到('改文字')) 头.push('使用 UnityEngine.UI');
-  if (头.length) 行.push(...头, '');
+  if (头.length) 行.push(...头);
 
   const 走 = (块们, 深, 父) => {
     for (const b of 块们) {

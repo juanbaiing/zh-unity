@@ -18,6 +18,28 @@ const 类型表 = { ...类型词表, '真值': 'bool' };
 const 固定方法名 = 生命周期词表;
 
 // 成员访问：目标.位置 → 目标.position；英文原样保留
+// 顺手把逗号后面补一个空格 —— `Translate(0,0,1)` 读起来是三个数字粘一块，
+// `(0, 0, 1)` 才一眼看出是三个参数。字符串里的逗号不动（"a,b" 不是两个参数）。
+function 补逗号空格(行) {
+  let 出 = '';
+  let 在串 = false, 转义 = false;
+  for (let i = 0; i < 行.length; i++) {
+    const c = 行[i];
+    if (转义) { 出 += c; 转义 = false; continue; }
+    if (在串 && c === '\\') { 出 += c; 转义 = true; continue; }
+    if (c === '"') { 在串 = !在串; 出 += c; continue; }
+    if (!在串 && (c === ',' || c === '，')) {
+      出 += ',';
+      while (行[i + 1] === ' ') i++;            // 中间已经被多给的空白挤掉
+      const 后 = 行[i + 1];
+      if (后 !== undefined && 后 !== ')' && 后 !== ']' && 后 !== '}') 出 += ' ';
+      continue;
+    }
+    出 += c;
+  }
+  return 出;
+}
+
 function 译成员(s) {
   return s.replace(/\.([\u4e00-\u9fa5]+)/g,
     (全, 名) => (成员词表[名] ? '.' + 成员词表[名] : 全));
@@ -324,23 +346,40 @@ function 译一行(原行, depth) {
 // 翻译整份脚本
 function 译脚本(中文源码) {
   const 结果 = [];
+  const 行们 = 中文源码.split(/\r?\n/);
   let depth = 0;
 
-  for (const 原行 of 中文源码.split(/\r?\n/)) {
-    const 原缩进 = 原行.match(/^\s*/)[0];
-    const 判 = 译一行(原行, depth);
-    if (!判) { continue; }
+  for (let i = 0; i < 行们.length; i++) {
+    const 原行 = 行们[i];
+    const t = 原行.trim();
+    // 缩进照搬中文那一行，不自己重算 —— 中文那边已经算好了层级
+    // （大括号比语句多缩进一级那种排法，翻译器重算必然会算歪）；
+    // 而且照搬才谈得上「一行对一行」。
+    const 原缩进 = (原行.match(/^\s*/) || [''])[0];
 
-    if (判.深 === -1) {
-      depth = Math.max(0, depth - 1);
-      结果.push('    '.repeat(depth) + 判.行);
+    // 中文源码里已经写出了 { 和 } 各占一行 —— 直接照搬，
+    // 别再靠「深:1」补一个，否则两边各多一行，逐行对齐就废了。
+    if (t === '{') { 结果.push(原缩进 + '{'); depth += 1; continue; }
+    if (t === '}') { depth = Math.max(0, depth - 1); 结果.push(原缩进 + '}'); continue; }
+
+    const 判 = 译一行(原行, depth);
+    if (!判) {
+      // 空行照着留一行 —— 中文和 C# 要能逐行对上，少一行就整体错位
+      结果.push(t ? t : '');
       continue;
     }
 
-    结果.push('    '.repeat(depth) + 判.行);
+    if (判.深 === -1) {
+      depth = Math.max(0, depth - 1);
+      结果.push(原缩进 + 判.行);
+      continue;
+    }
+
+    结果.push(原缩进 + 补逗号空格(判.行));
+    // 老写法：这一行自带开括号语义，且下一行不是手写的 { 时，才补一个
     if (判.深 === 1) {
-      结果.push('    '.repeat(depth) + '{');
-      depth += 1;
+      const 下一行 = (行们[i + 1] || '').trim();
+      if (下一行 !== '{') { 结果.push(原缩进 + '{'); depth += 1; }
     }
   }
 

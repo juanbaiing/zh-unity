@@ -105,19 +105,29 @@ function 生成(根块们) {
   const 要AI = /(NavMesh|navAgent|navMeshAgent)/i.test(词串);
 
   const 头 = [];
+  // 列表要用 using System.Collections.Generic —— 放在最头上，
+  // 而且必须由这边加：翻译器末尾那行补 using 是补救手段，
+  // 它凭空多一行，中间层就跟 C# 对不上号了。
+  if (用到('新建列表')) 头.push('使用 System.Collections.Generic');
   if (有类) 头.push('使用 UnityEngine');
   if (用到('切换场景')) 头.push('使用 UnityEngine.SceneManagement');
   if (要UI) 头.push('使用 UnityEngine.UI');
   if (要AI) 头.push('使用 UnityEngine.AI');
-  if (头.length) 行.push(...头, '');
+  if (头.length) { 行.push(...头, ''); }   // using 和下面的内容之间空一行
 
   const 取值 = b => ({ ...b.字段, 类型: b.类型 });
+
+  // 缩进按「层」算。大括号自己也算一层 —— 这是 VS 里
+  // 「Indent open and close braces」勾上后的样子（csharp_indent_braces = true）：
+  // 括号比语句多缩进一级，里面的内容再多一级，一眼看出括号属于上面那句话。
+  // C# 默认是 false（Allman：括号跟语句对齐），这里按使用者要的来。
+  const 缩 = 层 => '    '.repeat(层);
 
   const 走块 = (b, 深, 父) => {
     const 定义 = 块定义[b.类型];
     if (!定义) return;
 
-    const 缩进 = '    '.repeat(深);
+    const 缩进 = 缩(深);
     for (const 行内容 of 定义.模板(取值(b))) 行.push(缩进 + 行内容);
 
     if (!定义.可容纳) return;
@@ -125,19 +135,22 @@ function 生成(根块们) {
     // 容器里的块可以随便摆，生成时按「从上到下」排 —— 跟你在画布上看到的一致
     const 子们 = 按行读(b.子 || []);
 
-    行.push(缩进 + '{');
-    for (const 子 of 子们) 走块(子, 深 + 1, b);
+    行.push(缩(深 + 1) + '{');
+    for (let i = 0; i < 子们.length; i++) {
+      走块(子们[i], 深 + 2, b);
+      if (i < 子们.length - 1) 隔开(子们[i], 子们[i + 1]);
+    }
 
     // C# 要求 case 能脱离开关，否则 CS0163 / CS8070。
     // blocks.js 里早就补了这一句，blocks2 这条生成路径漏了 —— 同一个坑两条路，只修了一条。
     if (父 && 父.类型 === '多分支' && (b.类型 === '遇' || b.类型 === '其他')) {
       const 最后 = 子们[子们.length - 1];
       if (!最后 || (最后.类型 !== '跳出' && 最后.类型 !== '返回' && 最后.类型 !== '继续')) {
-        行.push('    '.repeat(深 + 1) + '跳出');
+        行.push(缩(深 + 2) + '跳出');
       }
     }
 
-    行.push(缩进 + '}');
+    行.push(缩(深 + 1) + '}');
 
     // 后续分支（否则若 / 否则）
     for (const 段 of b.分支) {
@@ -146,14 +159,39 @@ function 生成(根块们) {
       for (const 行内容 of 标题) 行.push(缩进 + 行内容);
 
       const 段子们 = 按行读(段.子 || []);
-      行.push(缩进 + '{');
-      for (const 子 of 段子们) 走块(子, 深 + 1, b);
-      行.push(缩进 + '}');
+      行.push(缩(深 + 1) + '{');
+      for (let i = 0; i < 段子们.length; i++) {
+        走块(段子们[i], 深 + 2, b);
+        if (i < 段子们.length - 1) 隔开(段子们[i], 段子们[i + 1]);
+      }
+      行.push(缩(深 + 1) + '}');
     }
   };
 
+  // 段落只在「大块」前后断：前一个是带大括号的块，或者后一个是。
+  // 两条普通语句之间不断 —— 一段流水账读起来比一堆碎行快。
+  // 但 try/catch、if/else 这种链式块中间插空行会读成两件事（StyleCop SA1510），不空。
+  const 连锁 = {
+    '捕获': ['尝试', '捕获'],      // try { } catch { } finally { }
+  };
+  const 是连锁的 = (前, 后) => {
+    const 许 = 连锁[后.类型];
+    return !!许 && 许.includes(前.类型);
+  };
+  const 是大块 = b => {
+    const 定 = 块定义[b.类型];
+    return !!(定 && 定.可容纳);
+  };
+  const 隔开 = (前, 后) => {
+    if (是连锁的(前, 后)) return;
+    if (是大块(前) || 是大块(后)) 行.push('');
+  };
+
   const 走一串 = (块们, 深) => {
-    for (const b of 块们) 走块(b, 深, null);
+    for (let i = 0; i < 块们.length; i++) {
+      走块(块们[i], 深, null);
+      if (i < 块们.length - 1) 隔开(块们[i], 块们[i + 1]);
+    }
   };
 
   走一串(根块们, 0);

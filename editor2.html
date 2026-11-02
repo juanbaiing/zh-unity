@@ -76,7 +76,7 @@
   .en{font-size:10px;color:#4a5568;font-style:italic;user-select:none;
     flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
-  .stage{flex:5 1 0;overflow:auto;min-width:200px}
+  .stage{flex:5 1 0;overflow:auto;min-width:260px}
   #world{position:relative;width:2400px;height:1600px;
     background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:#4a5568;font-size:12px}
@@ -95,8 +95,10 @@
   .blk.dragging{opacity:.85;z-index:999}
   .blk.孤岛{border-color:var(--bad);border-left-color:var(--bad)}
 
-  .head{display:flex;align-items:center;gap:5px;padding:5px 8px;flex-wrap:wrap;
-    cursor:move;user-select:none}
+  /* 头不换行 —— 字段块有 5 个格子，一换行整个块就变两行高，
+     跟别的块对不齐，看着像坏了。让它撑宽，宽度交给块自己。 */
+  .head{display:flex;align-items:center;gap:5px;padding:5px 8px;flex-wrap:nowrap;
+    cursor:move;user-select:none;white-space:nowrap}
   .ord{font-size:10px;color:#5a6478;min-width:14px;text-align:center;
     border-right:1px solid #2b3341;padding-right:4px;user-select:none}
   .kind{font-size:10px;color:var(--dim);background:#1f2632;padding:0 5px;border-radius:3px}
@@ -180,28 +182,39 @@
   .branch{border-top:1px dashed #2b3341}
   .branch .head{cursor:default}
 
-  .code{flex:3 1 0;min-width:200px;border-left:1px solid var(--line);display:flex;flex-direction:column}
-  .code .title{padding:5px 10px;font-size:10.5px;color:var(--dim);
+  .code{flex:4 1 0;min-width:300px;border-left:1px solid var(--line);display:flex;flex-direction:column}
+  .code .title{padding:5px 10px;font-size:10.5px;line-height:16px;color:var(--dim);
     border-bottom:1px solid var(--line);background:var(--panel)}
   /* 中间层单独一列。默认收成一条竖条（不占地方），点开才铺开，
      这样块、中文写法、C# 能横向对着看。 */
   .mid{flex:none;width:34px;background:#131820;border-left:1px solid var(--line);
     display:flex;flex-direction:column;overflow:hidden;
     transition:width .14s ease-out}
-  .mid.开{width:auto;flex:2 1 0;min-width:180px}
+  .mid.开{width:auto;flex:2 1 0;min-width:200px}
   .midBar{writing-mode:vertical-rl;padding:12px 0;font-size:11.5px;
     color:#6b7688;cursor:pointer;user-select:none;white-space:nowrap;
     letter-spacing:2px;flex:none;text-align:center}
   .midBar:hover{color:var(--cn)}
+  /* 展开后的标题条要和右边「生成的 C#」那条一模一样高 ——
+     差 1px，两边的第 N 行就不在同一水平线上，并排看就废了 */
   .mid.开 .midBar{writing-mode:horizontal-tb;padding:5px 10px;
+    font-size:10.5px;line-height:16px;
     border-bottom:1px solid var(--line);color:var(--cn);letter-spacing:0;
     display:flex;justify-content:space-between}
   .mid.开 .midBar::after{content:'▾';color:#4a5568}
   .midBar::before{content:''}
-  .mid > pre{margin:0;padding:8px 10px;flex:1;overflow:auto;display:none;
-    font-size:11.5px;line-height:1.6;white-space:pre;
-    color:#a8b8a0;background:#10151c;user-select:text}
-  .mid.开 > pre{display:block}
+  /* 中间层展开后跟 C# 那边同一套行结构：同字号、同行高、同一行号宽度，
+     只是文字是中文。两边并排 = 一行对一行，滚到哪里都在同一行上。 */
+  .mid .codelines{margin:0;padding:6px 0;flex:1;overflow:auto;display:none;
+    font-size:11.5px;line-height:1.55;white-space:pre;
+    background:#10151c;user-select:text}
+  .mid.开 .codelines{display:block}
+  .mid .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
+  .mid .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
+    color:#39424f;user-select:none;font-size:10.5px}
+  .mid .codelines .tx{flex:1;min-width:0;white-space:pre;color:#a8b8a0;
+    word-break:break-all}
+  .mid .codelines .tx.空{color:transparent}
 
   .codelines{margin:0;padding:6px 0;overflow:auto;flex:1;
     font-size:11.5px;line-height:1.55;white-space:pre;
@@ -209,7 +222,10 @@
   .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
   .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
     color:#39424f;user-select:none;font-size:10.5px}
-  .codelines .tx{flex:1;min-width:0;white-space:pre;color:var(--cs);word-break:break-all}
+  .codelines .tx{flex:1;min-width:0;white-space:pre;color:var(--cs);word-break:break-all;
+    position:relative}
+  /* 大括号结构线由 画行() 直接写成 background-image（一根线一层渐变，位置用 ch）——
+     这里不留样式，见画行() 里的 线图()。 */
   .codelines .ln.bad{background:#2a1414}
   .codelines .ln.bad .tx{color:#ff9a9a}
   .codelines .ln.warn2{background:#241f10}
@@ -264,7 +280,7 @@
 
   <section class="mid" id="midLayer">
     <div class="midBar" id="midToggle" title="点开：看这一堆块对应的中文写法">中间层</div>
-    <pre id="midOut"></pre>
+    <div class="codelines" id="midOut"></div>
   </section>
 
   <section class="code">
@@ -533,7 +549,29 @@ window.addEventListener('resize', 关简介);
 
 document.getElementById('midToggle').onclick = () => {
   document.getElementById('midLayer').classList.toggle('开');
+  对滚();
 };
+
+// 中间层和 C# 的两块代码区滚动联动 —— 行是一一对应的，
+// 一边滚到第 30 行，另一边也该停在第 30 行。
+let 正在对滚 = false;
+function 对滚() {
+  const 中 = document.getElementById('midOut');
+  const 右 = document.getElementById('out');
+  if (!中 || !右) return;
+  const 拉 = (甲, 乙) => {
+    甲.onscroll = () => {
+      if (正在对滚) return;
+      正在对滚 = true;
+      乙.scrollTop = 甲.scrollTop;
+      乙.scrollLeft = 甲.scrollLeft;
+      正在对滚 = false;
+    };
+  };
+  拉(中, 右);
+  拉(右, 中);
+}
+对滚();
 
 // ---------------- 说明浮层 ----------------
 // 点块上的 ? 弹出这块的说明。做成浮层而不是往块里塞——
@@ -1474,6 +1512,82 @@ function 查问题() {
 
 let 当前代码 = '';
 
+// 把一段源码画成带行号的逐行列表。C# 和中间层共用它 ——
+// 同一个函数画出来的东西，行高、行号宽、padding 天然一模一样。
+function 画行(盒, 源) {
+  if (!盒) return;
+  const 行们 = String(源 || '').split(String.fromCharCode(10));
+  // 末尾那个换行不算一行 —— 中文侧生成完没有尾换行、C# 有，
+  // 不砍掉的话右边永远多一行，看着像「对不齐」。
+  if (行们.length && 行们[行们.length - 1] === '') 行们.pop();
+  // 大括号结构线（VS 的 Structure Guide）：一根线对一个没关上的 `{`，
+  // 从那一行的 `{` 一直拉到配对的 `}`。
+  //
+  // ⚠️ 别按缩进画。按缩进画的话，缩进 16 的行会在 0/4/8/12 四个位置各画一根，
+  // 但真正有大括号的只有 4 和 12 —— 多出来的那两根是凭空画的，
+  // 看着就是把不该连的地方连起来了。
+  // 一根线 = 一层 1px 宽的渐变，位置用 ch 指定。
+  // ⚠️ 不能写成简写整串（"linear-gradient(...) 4ch 0 / 1px 100% no-repeat"）
+  // 然后塞进 background-image —— 那是 background 简写的语法，
+  // background-image 只吃图片部分，整串会被当成非法值丢掉，一根线都画不出来。
+  //
+  // 开括号那一行、闭括号那一行，**这一根线都不画**。
+  // 试过「从行中间开始画」，但 `{` 字符自己就占行内 3~15px，
+  // 线从 6px 起还是压在 `{` 身上，看着跟括号连成一体 —— 等于没改。
+  // VS 就是从 `{` 的下一行才开始，空隙整整一行，一眼看得出线和括号是两回事。
+  //
+  // 线要挪到「那个字符格的正中」，不能贴格子左边。
+  // 字符格左边是 4ch，但 `{` 的字形在格子里是居中的（墨迹落在 985→990，
+  // 格子从 985.2 开始），贴着左边画，看着就是往左偏了 3px。
+  // 加 0.5ch 正好落在格子中间。
+  const 线列 = c => (c + 0.5) + 'ch';
+  const 画线 = (字, 线们) => {
+    const 要画 = 线们.filter(o => !o.头 && !o.尾);
+    if (!要画.length) return;
+    const 层 = 'linear-gradient(to right, #2d3746 0 1px, transparent 1px)';
+    字.style.backgroundImage = 要画.map(() => 层).join(', ');
+    字.style.backgroundPosition = 要画.map(o => 线列(o.c) + ' 0').join(', ');
+    字.style.backgroundSize = 要画.map(() => '1px 100%').join(', ');
+    字.style.backgroundRepeat = 要画.map(() => 'no-repeat').join(', ');
+  };
+
+  const 片 = document.createDocumentFragment();
+  // 栈里存的是每个还开着的 `{` 所在列
+  const 括号栈 = [];
+  行们.forEach((文, i) => {
+    const t = (文 || '').trim();
+    const 缩进数 = ((文 || '').match(/^ */) || [''])[0].length;
+
+    // `{` 这一行自己也算在这一层里，所以先入栈再画
+    if (t === '{') 括号栈.push(缩进数);
+    // 每根线要知道自己在这一行是「刚开」「快收」还是「路过」——
+    // 头和尾要收一截，中间拉满（见 画线()）
+    const 本行线 = 括号栈.map((c, k) => ({
+      c,
+      头: t === '{' && k === 括号栈.length - 1,
+      尾: t === '}' && k === 括号栈.length - 1,
+    }));
+    // `}` 这一行画完才出栈 —— 这样一对大括号的首尾两行都有线，是连着的
+    if (t === '}') 括号栈.pop();
+
+    const 行 = document.createElement('div');
+    行.className = 'ln';
+    行.dataset.行 = i + 1;
+    const 号 = document.createElement('span');
+    号.className = 'no';
+    号.textContent = i + 1;
+    const 字 = document.createElement('span');
+    字.className = 'tx' + (文 ? '' : ' 空');
+    字.textContent = 文 || ' ';
+    if (本行线.length) 画线(字, 本行线);
+    行.appendChild(号);
+    行.appendChild(字);
+    片.appendChild(行);
+  });
+  盒.textContent = '';
+  盒.appendChild(片);
+}
+
 function 输出() {
   let 代码;
   try {
@@ -1483,32 +1597,15 @@ function 输出() {
   }
   当前代码 = 代码;
 
-  // 中间层：块经「中文转写」出来的样子，跟下面的 C# 是同一件事的两种写法
+  // 中间层：块经「中文转写」出来的样子，跟下面的 C# 是同一件事的两种写法。
+  // 渲染成和 C# 完全一样的行结构（同字号/同行高/同行号宽），
+  // 两边行数一样，所以第 N 行就是同一件事 —— 并排看、横着对照。
   const 中 = document.getElementById('midOut');
-  if (中) {
-    let 中间;
-    try { 中间 = 树.生成(根块们); } catch (e) { 中间 = '// 生成失败：' + e.message; }
-    中.textContent = 中间 || '// 画布是空的';
-  }
+  let 中间 = '';
+  try { 中间 = 树.生成(根块们); } catch (e) { 中间 = '// 生成失败：' + e.message; }
+  画行(中, 中间);
 
-  const 行们 = 代码.split(String.fromCharCode(10));
-  const 片 = document.createDocumentFragment();
-  行们.forEach((文, i) => {
-    const 行 = document.createElement('div');
-    行.className = 'ln';
-    行.dataset.行 = i + 1;
-    const 号 = document.createElement('span');
-    号.className = 'no';
-    号.textContent = i + 1;
-    const 字 = document.createElement('span');
-    字.className = 'tx';
-    字.textContent = 文 || ' ';
-    行.appendChild(号);
-    行.appendChild(字);
-    片.appendChild(行);
-  });
-  out.textContent = '';
-  out.appendChild(片);
+  画行(out, 代码);
   标错行();
 
   const 问题 = 查问题();
