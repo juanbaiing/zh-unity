@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Data.Sqlite;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -443,6 +444,160 @@ namespace ZhEditorShell
                                 };
                                 if (框.ShowDialog() == DialogResult.OK) 存引擎目录(框.SelectedPath);
                                 回话(网页, new { 命令 = "引擎目录", 路径 = 找引擎目录() });
+                                return;
+                            }
+
+                            // 关系图要的数据。库是数据层建的，这儿只读不写。
+                            if (命令 == "关系图数据")
+                            {
+                                var 资源 = 读目录();
+                                if (资源 == null)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "还没选 Assets 目录" });
+                                    return;
+                                }
+                                var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
+                                var 库 = Path.Combine(项目根, ".zh-bridge", "关系.db");
+
+                                if (!File.Exists(库))
+                                {
+                                    回话(网页, new
+                                    {
+                                        命令 = "关系图数据",
+                                        图 = (object?)null,
+                                        说 = "还没有关系库。先点「扫描项目」，再跑一次数据层灌库。",
+                                    });
+                                    return;
+                                }
+
+                                try
+                                {
+                                    using var 连 = new SqliteConnection($"Data Source={库};Mode=ReadWrite");
+                                    连.Open();
+                                    // 用实验稿那套格式（实例们 / 脚本 / 槽 / 入口 / 出口 / 线）
+                                    var (场景, 实例数) = 图数据.组装.组装画布(连, Path.GetFileName(项目根));
+                                    回话(网页, new { 命令 = "关系图数据", 图 = 场景, 实例数 });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "读关系库失败：" + ex.Message });
+                                }
+                                return;
+                            }
+
+                            // 拖完位置存下来。只写 布局 表，不碰扫描出来的东西。
+                            if (命令 == "存布局")
+                            {
+                                var 资源 = 读目录();
+                                if (资源 == null) return;
+                                var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
+                                var 库 = Path.Combine(项目根, ".zh-bridge", "关系.db");
+                                if (!File.Exists(库)) return;
+
+                                try
+                                {
+                                    var 项们 = 根.GetProperty("项");
+                                    using var 连 = new SqliteConnection($"Data Source={库};Mode=ReadWrite");
+                                    连.Open();
+                                    using var 务 = 连.BeginTransaction();
+                                    foreach (var 项 in 项们.EnumerateArray())
+                                    {
+                                        using var 命 = 连.CreateCommand();
+                                        命.Transaction = 务;
+                                        命.CommandText =
+                                            "INSERT INTO 布局(id, x, y) VALUES($id, $x, $y) " +
+                                            "ON CONFLICT(id) DO UPDATE SET x = $x, y = $y";
+                                        命.Parameters.AddWithValue("$id", 项.GetProperty("id").GetString());
+                                        命.Parameters.AddWithValue("$x", 项.GetProperty("x").GetDouble());
+                                        命.Parameters.AddWithValue("$y", 项.GetProperty("y").GetDouble());
+                                        命.ExecuteNonQuery();
+                                    }
+                                    务.Commit();
+                                    回话(网页, new { 命令 = "布局存好了" });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "存布局失败：" + ex.Message });
+                                }
+                                return;
+                            }
+
+                            // 一次把整个 Unity 项目里的脚本全转成块。
+                            // 一个个选文件不现实 —— 一个项目几十个脚本。
+                            if (命令 == "导入项目")
+                            {
+                                var 资源 = 读目录();
+                                if (资源 == null)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "还没选 Assets 目录" });
+                                    return;
+                                }
+                                try
+                                {
+                                    var 跳过目录 = new[] { "Library", "Temp", "obj", "Logs", "UserSettings", ".git", ".vs", "Editor" };
+                                    var 文件们 = 递归找(资源, "*.cs", 跳过目录);
+                                    var 列表 = new List<object>();
+                                    var 转不动 = new List<string>();
+
+                                    foreach (var 文件 in 文件们)
+                                    {
+                                        var 脚本相对 = 文件.StartsWith(资源)
+                                            ? 文件.Substring(资源.Length).TrimStart('\\', '/').Replace('\\', '/')
+                                            : 文件;
+                                        try
+                                        {
+                                            var 源码 = File.ReadAllText(文件);
+                                            var 块们 = 代码转块.转脚本(源码, out var 项目名);
+                                            if (string.IsNullOrEmpty(项目名)) continue;   // 没有类，比如纯接口文件
+                                            列表.Add(new { 项目名, 文件 = 脚本相对, 块们 });
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            转不动.Add(脚本相对 + " —— " + ex.Message);
+                                        }
+                                    }
+
+                                    回话(网页, new
+                                    {
+                                        命令 = "导入项目",
+                                        找到 = 文件们.Count,
+                                        列表,
+                                        转不动,
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "读项目失败：" + ex.Message });
+                                }
+                                return;
+                            }
+
+                            // 把一个已经写好的 .cs 转成块。Unity 项目里的脚本从来不是块画出来的，
+                            // 转过来才能在图上看、在画布上改。
+                            if (命令 == "导入脚本")
+                            {
+                                using var 框 = new OpenFileDialog
+                                {
+                                    Title = "选一个 C# 脚本，转成块",
+                                    Filter = "C# 脚本 (*.cs)|*.cs",
+                                };
+                                if (框.ShowDialog() != DialogResult.OK) return;
+                                try
+                                {
+                                    var 源码 = File.ReadAllText(框.FileName);
+                                    var 块们 = 代码转块.转脚本(源码, out var 项目名);
+                                    回话(网页, new
+                                    {
+                                        命令 = "导入脚本",
+                                        项目名 = string.IsNullOrEmpty(项目名) ? "未命名" : 项目名,
+                                        文件 = 框.FileName,
+                                        块们,
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "转块失败：" + ex.Message });
+                                }
                                 return;
                             }
 

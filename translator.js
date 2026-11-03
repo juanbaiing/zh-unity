@@ -128,6 +128,10 @@ function 翻一行(line) {
   m = t.match(/^返回\s+(.+?)\s*$/);
   if (m) return 包(`return ${翻表达式(m[1])};`);
 
+  // 空返回 —— void 方法里的 return; 走这条（不写值就不带值）
+  // 用正则不用全等：块生成出来的行尾可能带空格
+  if (/^返回\s*$/.test(t.trim())) return 包('return;');
+
   // 块结束
   if (t === '}' || t === '结束') return 包('}');
 

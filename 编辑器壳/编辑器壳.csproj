@@ -12,12 +12,18 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
   </ItemGroup>
 
   <!-- 把打包好的单文件页面塞进 exe 里，发布出来就一个文件 -->
   <ItemGroup>
     <EmbeddedResource Include="..\中文编辑器.html" LogicalName="ZhEditorShell.index.html" />
+  </ItemGroup>
+
+  <!-- 和图数据层共用同一份组装代码，不抄第二份 -->
+  <ItemGroup>
+    <Compile Include="..\数据层\图数据.cs" Link="图数据.cs" />
   </ItemGroup>
 
 </Project>

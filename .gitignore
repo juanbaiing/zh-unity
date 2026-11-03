@@ -31,3 +31,13 @@ _*.html
 _*.ps1
 _*.png
 _截屏-*.png
+
+# 新增的几个工具项目，构建产物同样不进仓库
+数据层/bin/
+数据层/obj/
+源码扫描/bin/
+源码扫描/obj/
+转块测试/bin/
+转块测试/obj/
+zhbridge-check/bin/
+zhbridge-check/obj/

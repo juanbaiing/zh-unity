@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>数据层</AssemblyName>
+    <RootNamespace>数据层</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="schema.sql" />
+    <None Update="schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="图模板.html" />
+    <None Update="图模板.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

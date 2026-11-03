@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>关系图 · __标题__</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0e12;color:#a9b4c2;
+    font:12.5px/1.5 "Cascadia Code","Consolas",monospace;overflow:hidden}
+  svg{display:block;width:100vw;height:100vh;user-select:none}
+  /* 图例和提示是界面，不是画布内容 —— 它们不能跟着 viewBox 一起缩放，
+     所以放在 HTML 层固定住，不放进 SVG 里。 */
+  #图例{position:fixed;left:16px;bottom:14px;display:flex;gap:20px;flex-wrap:wrap;
+    max-width:calc(100vw - 200px);font-size:10.5px;color:#4b5d72;pointer-events:none;z-index:9}
+  #图例 span{display:flex;align-items:center;gap:6px}
+  #图例 i{width:8px;height:8px;border-radius:2px;flex:none}
+  #图例 i.圈{border-radius:50%;background:none!important;border:1.3px dashed #4a4560}
+  #提示{position:fixed;left:16px;top:14px;font-size:11px;color:#39434f;
+    pointer-events:none;z-index:9}
+  /* ---- 窗口里的真块：从 zh-csharp-lab 搬过来的那套 ---- */
+  .窗块{position:relative;background:#171c25;border:1px solid #2b3341;
+    border-left:3px solid #3a4757;border-radius:5px;margin:0 0 6px 0;
+    font:12.5px "Cascadia Code",Consolas,monospace;color:#c9d4e3;white-space:nowrap}
+  .窗块.容{background:#141922;border-left-color:#5a3f8a}
+  .窗块 .头{display:flex;align-items:center;gap:5px;padding:5px 8px;
+    cursor:move;user-select:none;flex-wrap:nowrap}
+  .窗块 .号{font-size:10px;color:#5a6478;min-width:14px;text-align:center;
+    border-right:1px solid #2b3341;padding-right:4px;user-select:none}
+  .窗块 .类{font-size:10px;color:#7b8494;background:#1f2632;padding:0 5px;border-radius:3px}
+  .窗块 .填{color:#7ee787;border:1px solid transparent;border-radius:3px;padding:0 5px;
+    outline:none;background:#12161d;font:11.5px "Cascadia Code",Consolas,monospace;
+    height:20px;line-height:18px;cursor:text}
+  .窗块 .填:focus{border-color:#7ee787;background:#0d1117}
+  .窗块 .填::placeholder{color:#4a5568}
+  .窗块 .钮{color:#6b7688;cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
+  .窗块 .钮:hover{color:#7ee787}
+  .窗块 .体{margin:0 8px 8px 16px;padding:6px;
+    border:1px dashed #2b3341;border-radius:4px;min-height:26px;background:#10151c}
+  .窗块 .体:empty::after{content:'拖块进来';color:#39424f;font-size:11px}
+
+  #控{position:fixed;right:14px;top:14px;display:flex;gap:8px;align-items:center;z-index:9}
+  #控 button{background:#161a21;color:#7b8494;border:1px solid #252b36;border-radius:5px;
+    padding:4px 11px;font:inherit;font-size:11px;cursor:pointer}
+  #控 button:hover{color:#c9d4e3;border-color:#39424f}
+  #比例{color:#39424f;font-size:11px;min-width:38px}
+</style>
+</head>
+<body>
+<div id="图例"></div>
+<div id="提示">拖标题条移动整块　·　拖空白平移　·　滚轮缩放　·　点脚本名收放</div>
+<div id="控">
+  <button id="复位" title="回到原点（鼠标滚轮缩放，拖空白平移）">复位</button>
+  <span id="比例">100%</span>
+  <span id="档位"></span>
+</div>
+<svg id="画" viewBox="0 0 1400 860" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <pattern id="格细" patternUnits="userSpaceOnUse" width="20" height="20">
+      <path d="M20 0 H0 V20" fill="none" stroke="#1a222d" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    </pattern>
+    <pattern id="格粗" patternUnits="userSpaceOnUse" width="100" height="100">
+      <path d="M100 0 H0 V100" fill="none" stroke="#25303d" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    </pattern>
+  </defs>
+</svg>
+<script>
+// ============================================================
+// 第五版：结构没动，动了配色和重量。
+//
+// 按三条改的：
+//   1. 颜色必须编码含义 —— 整张图只剩两种「有颜色的东西」：
+//      脚本（一种青灰蓝，表示"行为"）和数据（一种暗绿，表示"值"）。
+//      其余的线、框、字，全部是灰阶。灰阶不用来抢注意力，只用来分层。
+//   2. 装饰不带信息就删 —— 数据槽的方框全拆了，改成一条细下划线；
+//      每个脚本都种一种颜色这件事取消，改成左边一条同色竖条（弱很多）。
+//   3. 对比用在结构上 —— 框的边稍微亮一点（浮出背景），
+//      正文反而压暗（长时间看不累）。最亮的那一点留给连线。
+// ============================================================
+const 色 = {
+  底:'#0b0e12',
+  框:'#151a21', 框边:'#242c37',
+  条:'#1b222b',
+  脚:'#1a2028', 脚边:'#28313d',
+  字:'#a9b4c2',    // 正文，压暗
+  弱:'#5d6b7d',    // 次要
+  更弱:'#39434f',  // 极弱（类型、组件名）
+  值:'#5f9e7a',    // 数据值 —— 唯一的绿，且不亮
+  名:'#6f8aa3',    // 数据名
+  线:'#7a6a3f',    // 连线 —— 全图最"亮"的一处，但仍是暗金
+  头:'#c8d2de',    // 实例名，最亮
+};
+
+const 场景 = __数据__;
+
+const NS='http://www.w3.org/2000/svg';
+const 画布 = document.getElementById('画');
+const 元=(n,a={})=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e;};
+const 文=(父,x,y,t,a={})=>{const e=元('text',{x,y,fill:色.字,'font-size':12,...a});e.textContent=t;父.appendChild(e);return e;};
+
+const 槽高=21, 行高=17;
+
+// 每个脚本内部是一张独立的小画布（窗户）：
+// 它有自己的平移和缩放，跟外面的大画布互不干扰。
+// 外面缩放时窗框变大变小，但里面的块不跟着变 —— 窗框变大只是能看见更多。
+function 内视(s){
+  if (!s._内) s._内 = { x: 0, y: 0, z: 1 };
+  return s._内;
+}
+const 定义 = 画布.querySelector('defs');
+
+// ---------- 背景网格 ----------
+// 粗一层、细一层。格子的世界尺寸会随缩放换档，屏幕上永远保持在 60~400px 之间。
+// 不这么做的话：固定 20 单位，缩到 25% 就糊成灰，放到 400% 就一格顶满屏。
+const 格层 = 元('g', { 'pointer-events':'none' });
+const 细格 = 元('rect', { fill:'url(#格细)' });
+const 粗格 = 元('rect', { fill:'url(#格粗)' });
+格层.appendChild(细格); 格层.appendChild(粗格);
+画布.appendChild(格层);
+
+// 刻度层：只在画布四边沿粗格画一小段短线，像尺子。
+// 不标数字 —— 这是关系图，不是坐标系图；只要「知道自己在第几格」就够了。
+const 刻度层 = 元('g', { 'pointer-events':'none' });
+画布.appendChild(刻度层);
+
+const 连线层 = 元('g'); 画布.appendChild(连线层);
+
+// ---------- 按尺度分级：缩到远处就只留个名字 ----------
+// 像地图：省界上出省名，街道级才出每栋楼。数据没变，只是每一级挑不同的看。
+let 档 = 2;                       // 0 远 / 1 中 / 2 近
+const 正文字号 = 11;              // 画布里正文原本多大
+
+// 判据不是倍率，是「字在屏幕上有多少像素」——
+// 倍率是拍脑袋的，「小于 8px 读不动」是量出来的。
+// 8px 是舒服的阅读下限；24px 以上说明已经凑得很近了，该给更多细节。
+function 屏幕字号(){ return 正文字号 * (原点.w / 视.w); }
+function 算档(){
+  const 字 = 屏幕字号();
+  if (字 < 8) return 0;
+  if (字 < 24) return 1;
+  return 2;
+}
+
+// 脚本框的高度：收起时只剩一行。档 0 时一律收起。
+function 收起没(s){ return s.收 || 档 === 0; }
+// 块第一次出现时自动排一次位（缩进 + 竖排），之后记住坐标，就归你手摆了
+function 布块(块们, 内宽){
+  let y = 2;
+  const 走 = (们, 层) => {
+    for (const b of 们) {
+      if (b.x === undefined) {
+        b.x = 层 * 11;
+        b.y = y;
+        b.w = Math.max(60, 内宽 - 8 - 层 * 11);
+        y += 24;
+      }
+      if (b.子) 走(b.子, 层 + 1);
+    }
+  };
+  走(块们, 0);
+  return y;
+}
+// 真块的高度是 HTML 自己撑出来的，这里只估一个够用的数，
+// 渲染完再把实际量到的高度写回去。
+function 数块高(块们){
+  let h = 0;
+  for (const b of 块们 || []) {
+    h += 32;
+    if (b.子) h += 数块高(b.子) + 16;
+  }
+  return h + 8;
+}
+function 脚本高(s){
+  if (收起没(s)) return 26;
+  return 28 + s.槽.length*槽高
+    + (s.块树 ? 数块高(s.块树) + 6 : 0)
+    + (s.出口?.length||0)*行高 + (s.入口?.length||0)*行高 + 6;
+}
+function 量实例(实例){
+  let 内 = 44;
+  for (const s of 实例.脚本) { s.高 = 脚本高(s); 内 += s.高 + 9; }
+  实例.h = 内 + 4;
+}
+for (const 实例 of 场景.实例们) 量实例(实例);
+
+// ---------- 视窗：缩放和平移 ----------
+// 不缩放元素本身，只改「看的窗口」（viewBox）。
+// 这样里面的东西永远按新尺寸重新画，缩到哪一级都是清楚的，不会糊。
+const 原点 = { x: 0, y: 0, w: 1400, h: 860 };
+const 视 = { ...原点 };
+
+function 应用视() {
+  画布.setAttribute('viewBox', `${视.x} ${视.y} ${视.w} ${视.h}`);
+  const 比 = Math.round(原点.w / 视.w * 100);
+  const 标 = document.getElementById('比例');
+  if (标) 标.textContent = 比 + '%';
+  const 档标 = document.getElementById('档位');
+  if (档标) {
+    档标.textContent = ['远 · 只剩名字', '中 · 加数据', '近 · 再加类型'][算档()] +
+      '  ' + 屏幕字号().toFixed(1) + 'px';
+  }
+
+  // 网格换档：屏幕上每格保持 60~400px
+  // 像素比 = 一个屏幕像素相当于多少世界单位
+  const 屏宽 = 画布.getBoundingClientRect().width || 1400;
+  const 像素比 = 视.w / 屏宽;
+  let 基础 = 100;
+  while (基础 / 像素比 < 60) 基础 *= 2;
+  while (基础 / 像素比 > 400) 基础 /= 2;
+  const 细 = 基础 / 5;
+
+  const 粗图 = document.getElementById('格粗');
+  const 细图 = document.getElementById('格细');
+  if (粗图) {
+    粗图.setAttribute('width', 基础); 粗图.setAttribute('height', 基础);
+    粗图.firstElementChild.setAttribute('d', `M${基础} 0 H0 V${基础}`);
+  }
+  if (细图) {
+    细图.setAttribute('width', 细); 细图.setAttribute('height', 细);
+    细图.firstElementChild.setAttribute('d', `M${细} 0 H0 V${细}`);
+  }
+  for (const r of [细格, 粗格]) {
+    r.setAttribute('x', 视.x); r.setAttribute('y', 视.y);
+    r.setAttribute('width', 视.w); r.setAttribute('height', 视.h);
+  }
+  // 细格太密（屏幕上小于 8px）就别画了，否则一片灰
+  if (细格) 细格.style.display = (细 / 像素比 < 8) ? 'none' : '';
+  画刻度(基础, 像素比);
+
+  // 跨档才动，而且动得是渐变的
+  const 新档 = 算档();
+  if (新档 !== 档) {
+    切档到(新档);
+    return;                       // 切档里已经重画过线
+  }
+}
+
+// 把屏幕坐标翻成画布坐标。缩放平移多少都能算对 ——
+// 以前是写死的「1400 ÷ 屏幕宽」，一缩放就全错。
+function 世界坐标(e) {
+  const p = 画布.createSVGPoint();
+  p.x = e.clientX; p.y = e.clientY;
+  return p.matrixTransform(画布.getScreenCTM().inverse());
+}
+
+// 鼠标现在压在哪一层？返回 {实例, 脚本} 或 null（在空白处）
+// 判据是「世界坐标落在哪个脚本框内部」，不是 event.target ——
+// 因为窗户是裁剪出来的，目标元素可能是块、也可能是空白，都该算这一层。
+function 压在哪层(世界点){
+  for (const 实例 of 场景.实例们) {
+    if (!实例.g) continue;
+    const lx = 世界点.x - 实例.x, ly = 世界点.y - 实例.y;
+    if (lx < 0 || ly < 0 || lx > 实例.w || ly > 实例.h) continue;
+    for (const s of 实例.脚本) {
+      const r = s._窗;
+      if (!r) continue;
+      if (ly >= r.y && ly <= r.y + r.h) return { 实例, 脚本: s };
+    }
+    return { 实例, 脚本: null };     // 框里但不在任何脚本窗口上
+  }
+  return null;
+}
+
+// 滚轮缩放：以光标为中心。
+// 以画布中心缩放的话，鼠标指的东就跑了，来回缩几次就找不着自己在哪。
+画布.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const 层 = e.shiftKey ? null : 压在哪层(世界坐标(e));
+
+  // 在某个脚本窗口上，而且没按 Shift —— 缩的是这扇窗户里的世界
+  if (层 && 层.脚本 && !收起没(层.脚本)) {
+    const 内 = 内视(层.脚本);
+    const 旧z = 内.z;
+    const 新z = Math.min(4, Math.max(0.4, 旧z * (e.deltaY > 0 ? 0.9 : 1.1)));
+    // 以光标为中心：光标在窗户里的那个点，缩放前后要停在原地
+    const 世 = 世界坐标(e);
+    const 窗 = 层.脚本._窗;
+    const 基点x = 层.实例.x + 窗.bx + 8;
+    const 基点y = 层.实例.y + 窗.y;
+    const 局x = (世.x - 基点x - 内.x) / 旧z;
+    const 局y = (世.y - 基点y - 内.y) / 旧z;
+    内.x = (世.x - 基点x) - 局x * 新z;
+    内.y = (世.y - 基点y) - 局y * 新z;
+    内.z = 新z;
+    重建(层.实例, true);
+    重画线();
+    return;
+  }
+
+  const 前 = 世界坐标(e);
+  const r = 画布.getBoundingClientRect();
+  const 倍 = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+  const 新w = Math.min(原点.w * 4, Math.max(原点.w / 12, 视.w * 倍));
+  const 新h = 新w * (原点.h / 原点.w);
+  // 让「光标底下那个点」在缩放前后停在同一个屏幕位置
+  视.x = 前.x - (e.clientX - r.left) / r.width * 新w;
+  视.y = 前.y - (e.clientY - r.top) / r.height * 新h;
+  视.w = 新w; 视.h = 新h;
+  应用视();
+}, { passive: false });
+
+// 拖空白 = 平移画面
+let 平移 = null;
+画布.addEventListener('pointerdown', (e) => {
+  // 按在块上，交给块自己处理（现在还没做，先不管）；按在空白才拖画布
+  const 层 = e.shiftKey ? null : 压在哪层(世界坐标(e));
+  if (层 && 层.脚本) return;          // 在窗户内部，由窗户自己拖
+
+  画布.setPointerCapture(e.pointerId);
+  平移 = { 起x: e.clientX, 起y: e.clientY, 原x: 视.x, 原y: 视.y };
+});
+画布.addEventListener('pointermove', (e) => {
+  if (!平移) return;
+  const r = 画布.getBoundingClientRect();
+  const 每像素 = 视.w / r.width;
+  视.x = 平移.原x - (e.clientX - 平移.起x) * 每像素;
+  视.y = 平移.原y - (e.clientY - 平移.起y) * 每像素;
+  应用视();
+});
+画布.addEventListener('pointerup', (e) => {
+  平移 = null;
+  try { 画布.releasePointerCapture(e.pointerId); } catch {}
+});
+
+// 四边刻度：在每条粗格线的位置，从边缘往里伸一小段。
+// 长度按屏幕像素算（7px），不按世界单位 —— 缩放时刻度得一样长，不然就成花纹了。
+function 画刻度(基础, 像素比) {
+  刻度层.textContent = '';
+  if (!基础 || !像素比) return;
+  const 长 = 7 * 像素比;
+  const 笔 = { stroke:'#2e3b4a', 'stroke-width':1, 'vector-effect':'non-scaling-stroke' };
+  const 左 = 视.x, 右 = 视.x + 视.w, 上 = 视.y, 下 = 视.y + 视.h;
+
+  for (let x = Math.ceil(左 / 基础) * 基础; x <= 右; x += 基础) {
+    if (x < 左 || x > 右) continue;
+    刻度层.appendChild(元('line', { ...笔, x1:x, y1:上, x2:x, y2:上 + 长 }));
+    刻度层.appendChild(元('line', { ...笔, x1:x, y1:下 - 长, x2:x, y2:下 }));
+  }
+  for (let y = Math.ceil(上 / 基础) * 基础; y <= 下; y += 基础) {
+    if (y < 上 || y > 下) continue;
+    刻度层.appendChild(元('line', { ...笔, x1:左, y1:y, x2:左 + 长, y2:y }));
+    刻度层.appendChild(元('line', { ...笔, x1:右 - 长, y1:y, x2:右, y2:y }));
+  }
+}
+
+// 窗户内部：按在空白处拖 = 平移这扇窗户里的世界
+画布.addEventListener('pointerdown', (e) => {
+  if (e.shiftKey) return;                  // Shift 交给外面
+  const 层 = 压在哪层(世界坐标(e));
+  if (!层 || !层.脚本) return;
+  if (收起没(层.脚本)) return;
+
+  const 世 = 世界坐标(e);
+  const 内 = 内视(层.脚本);
+  画布.setPointerCapture(e.pointerId);
+  窗拖 = { 实例: 层.实例, 脚本: 层.脚本, 起: 世, 原x: 内.x, 原y: 内.y };
+});
+let 窗拖 = null;
+画布.addEventListener('pointermove', (e) => {
+  if (!窗拖) return;
+  const 世 = 世界坐标(e);
+  const 内 = 内视(窗拖.脚本);
+  // 世界位移要换算成窗户内部的位移（除以内部缩放）
+  内.x = 窗拖.原x + (世.x - 窗拖.起.x);
+  内.y = 窗拖.原y + (世.y - 窗拖.起.y);
+  重建(窗拖.实例, true);
+  重画线();
+});
+画布.addEventListener('pointerup', (e) => {
+  窗拖 = null;
+  try { 画布.releasePointerCapture(e.pointerId); } catch {}
+});
+
+document.getElementById('复位').onclick = () => {
+  Object.assign(视, 原点);
+  应用视();
+};
+
+// ---------- 切档动画 ----------
+// 档是离散的（远/中/近），但变化不该「啪」一下跳过去。
+// 用 180ms 把每个脚本框的高度插值过去 —— 像抽屉慢慢拉开，不是瞬间弹开。
+let 动画中 = false;
+function 切档到(新档) {
+  if (动画中) return;             // 上一段没走完就别再插一脚
+  动画中 = true;
+
+  const 起 = new Map(), 终 = new Map();
+  for (const 实例 of 场景.实例们) for (const s of 实例.脚本) 起.set(s, s.高);
+
+  档 = 新档;
+  for (const 实例 of 场景.实例们) {
+    量实例(实例);
+    for (const s of 实例.脚本) 终.set(s, s.高);
+  }
+
+  const t0 = performance.now(), 时长 = 180;
+  const 跑 = () => {
+    const t = Math.min(1, (performance.now() - t0) / 时长);
+    const e = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;   // 先慢后快再慢
+    for (const 实例 of 场景.实例们) {
+      let 内 = 44;
+      for (const s of 实例.脚本) {
+        s.高 = 起.get(s) + (终.get(s) - 起.get(s)) * e;
+        内 += s.高 + 9;
+      }
+      实例.h = 内 + 4;
+      重建(实例, true);
+    }
+    if (t < 1) requestAnimationFrame(跑);
+    else 动画中 = false;
+  };
+  requestAnimationFrame(跑);
+}
+
+function 重建(实例, 免量) {
+  if (实例.g && 实例.g.parentNode) 实例.g.parentNode.removeChild(实例.g);
+  if (!免量) 量实例(实例);
+  建实例(实例);
+  重画线();
+}
+
+function 建实例(实例) {
+  const g = 元('g', { transform:`translate(${实例.x},${实例.y})` });
+  实例.g = g;
+
+  // 外框：边比底亮一档，靠这个浮出来，不靠阴影
+  g.appendChild(元('rect', { x:0, y:0, width:实例.w, height:实例.h, rx:8,
+    fill:色.框, stroke:色.框边, 'stroke-width':1.4 }));
+
+  const 条 = 元('rect', { x:0, y:0, width:实例.w, height:34, rx:8, fill:色.条, style:'cursor:grab' });
+  g.appendChild(条);
+  g.appendChild(元('rect', { x:0, y:26, width:实例.w, height:8, fill:色.条 }));
+
+  文(g, 14, 22, 实例.名, { 'font-size':13.5, fill:色.头 });
+  文(g, 实例.w-14, 22, `${实例.tag} · L${实例.层}${实例.激活?'':' · 未激活'}`,
+     { fill:色.更弱,'font-size':10,'text-anchor':'end' });
+  文(g, 14, 实例.h-9, 实例.组件, { fill:色.更弱,'font-size':9.5 });
+
+  实例.锚 = {};
+  let y = 44;
+
+  for (const s of 实例.脚本) {
+    const bx=12, bw=实例.w-24, by=y, bh=s.高;
+    const sg = 元('g');
+    // 脚本体：不描边，只比实例底亮一点。左边一条竖条当身份标识，
+    // 但所有脚本用同一种颜色 —— 颜色留给"这是什么"，不留给"这是第几个"。
+    sg.appendChild(元('rect', { x:bx, y:by, width:bw, height:bh, rx:5, fill:色.脚 }));
+    sg.appendChild(元('rect', { x:bx, y:by+8, width:2, height:bh-16, rx:1, fill:'#3a4757' }));
+    文(sg, bx+13, by+18, s.名, { fill:'#8ea6bf', 'font-size':12 });
+
+    // 收起后：边框上留几个点，表示「有几个口朝外」。
+    // 收起来不等于没有 —— 得让人知道这里连出去了几根。
+    if (收起没(s)) {
+      const 口数 = (s.出口?.length || 0);
+      for (let k = 0; k < 口数; k++) {
+        sg.appendChild(元('circle', { cx: bx + bw - 10 - k * 11, cy: by + 13, r: 3.2,
+          fill: 'none', stroke: 色.线, 'stroke-width': 1.3 }));
+      }
+      // 有槽没填，收起来也留个红点
+      const 有空的 = s.槽.some(c => c.v === null);
+      if (有空的) {
+        sg.appendChild(元('circle', { cx: bx + bw - 10 - 口数 * 11 - 6, cy: by + 13, r: 2.6, fill: '#8a5a5a' }));
+      }
+      // 名字右边一个 ▸，示意能展开
+      文(sg, bx + 13 + s.名.length * 7.6 + 6, by + 18, '▸', { fill: '#39434f', 'font-size': 10 });
+      // 线照样连 —— 但都从边框这一点出去。收起后看不出是哪个口，
+      // 只知道「有几根，连到哪」。
+      if (s.出口) for (const o of s.出口) {
+        实例.锚[s.名+'/出'+o.名] = { x:bx+bw, y:by+13, 到:o.到, 条件:o.条件, 收起:true };
+      }
+    } else {
+      文(sg, bx + 13 + s.名.length * 7.6 + 6, by + 18, '▾', { fill: '#2a3340', 'font-size': 10 });
+    }
+
+    // 点名字那一行切换收放
+    const 开关 = 元('rect', { x:bx, y:by, width:bw, height:26, fill:'transparent', style:'cursor:pointer' });
+    开关.addEventListener('click', (e) => { e.stopPropagation(); s.收 = !s.收; 重建(实例); });
+    sg.appendChild(开关);
+
+    let yy = by + 33;
+    if (!收起没(s)) for (const c of s.槽) {
+      const 空 = c.v === null;
+      // 数据：不画框，一排字 + 一条极淡的下划线
+      sg.appendChild(元('line', { x1:bx+13, y1:yy+4, x2:bx+bw-13, y2:yy+4,
+        stroke:'#232b36', 'stroke-width':1 }));
+      文(sg, bx+14, yy, c.k, { fill:色.名, 'font-size':11 });
+      文(sg, bx+108, yy, 空 ? '没填' : c.v,
+        { fill: 空?'#8a5a5a':色.值, 'font-size':11 });
+      if (档 === 2) 文(sg, bx+bw-14, yy, c.类型, { fill:色.更弱,'font-size':9.5,'text-anchor':'end' });
+      yy += 槽高;
+    }
+
+    // ---- 代码块树：这就是脚本的实体，上面那些槽是它的接口 ----
+    // 块画在「一扇窗户」里：外面裁剪到脚本框，里面可以自己平移缩放。
+    if (!收起没(s) && s.块树) {
+      const 视 = 内视(s);
+      const 窗高 = 数块高(s.块树) + 6;
+      // yy 本来就是相对实例框的坐标（从 44 开始往上累加），
+      // 别再减 实例.y —— 多减一次窗口就整体偏了 130px，鼠标永远落不进去。
+      s._窗 = { y: yy - 16, h: 窗高, bx, bw };
+      const 裁id = '裁' + (实例.id + s.名).replace(/[^\w]/g, '');
+      const 内宽 = bw - 16;
+
+      // 裁剪框：固定贴在脚本框上，里面怎么移都出不去
+      const cp = 元('clipPath', { id: 裁id });
+      cp.appendChild(元('rect', { x: bx, y: yy - 16, width: bw, height: 窗高 }));
+      定义.appendChild(cp);
+
+      // 窗户里的世界：自己一套平移缩放
+      const 窗 = 元('g', { 'clip-path': `url(#${裁id})` });
+      const 世界 = 元('g', {
+        transform: `translate(${bx + 8 + 视.x}, ${yy - 16 + 视.y}) scale(${视.z})`
+      });
+
+      // 窗户里也有自己的网格 —— 这样放大进去，你脚下是有坐标的，
+      // 不像悬在半空。网格用的是窗口内部的坐标，跟外面那套各管各的。
+      // 真块是流式排的，不用手算坐标
+      // 网格铺满「现在能看见的范围」，不是内容包围盒 ——
+      // 不然块一拖出去，脚下就没格子了。
+      const 格 = 20;
+      const 左 = -视.x / 视.z, 右 = (内宽 - 视.x) / 视.z;
+      const 上 = -视.y / 视.z, 下 = (窗高 - 视.y) / 视.z;
+      for (let gx = Math.floor(左 / 格) * 格; gx <= 右; gx += 格)
+        世界.appendChild(元('line', { x1:gx, y1:上, x2:gx, y2:下,
+           stroke:'#1e2835', 'stroke-width':0.6 }));
+      for (let gy = Math.floor(上 / 格) * 格; gy <= 下; gy += 格)
+        世界.appendChild(元('line', { x1:左, y1:gy, x2:右, y2:gy,
+           stroke:'#1e2835', 'stroke-width':0.6 }));
+
+      // 真块：不是画出来的矩形，是真的 HTML —— 输入框能打字、下拉能选。
+      // 塞在 foreignObject 里，跟着内部世界的缩放走。
+      const 造 = (块们, 顶层) => {
+        const 盒 = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+        for (const b of 块们) {
+          const 块 = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+          块.className = '窗块' + (b.子 ? ' 容' : '');
+          const 头 = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+          头.className = '头';
+          const 号 = document.createElementNS('http://www.w3.org/1999/xhtml', 'span');
+          号.className = '号'; 号.textContent = (块们.indexOf(b) + 1);
+          const 类 = document.createElementNS('http://www.w3.org/1999/xhtml', 'span');
+          类.className = '类'; 类.textContent = b.类 || '语句';
+          const 名 = document.createElementNS('http://www.w3.org/1999/xhtml', 'input');
+          名.className = '填'; 名.value = b.名 || ''; 名.style.width = '86px';
+          名.addEventListener('input', () => { b.名 = 名.value; });
+          头.appendChild(号); 头.appendChild(类); 头.appendChild(名);
+          if (b.补 !== undefined) {
+            const 补 = document.createElementNS('http://www.w3.org/1999/xhtml', 'input');
+            补.className = '填'; 补.value = b.补; 补.style.width = '52px';
+            补.addEventListener('input', () => { b.补 = 补.value; });
+            头.appendChild(补);
+          }
+          块.appendChild(头);
+          if (b.子) {
+            const 体 = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+            体.className = '体';
+            体.appendChild(造(b.子, false));
+            块.appendChild(体);
+          }
+          盒.appendChild(块);
+        }
+        return 盒;
+      };
+      const 洞 = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+      洞.setAttribute('x', 0); 洞.setAttribute('y', 0);
+      洞.setAttribute('width', 内宽); 洞.setAttribute('height', 窗高);
+      洞.appendChild(造(s.块树, true));
+      世界.appendChild(洞);
+      窗.appendChild(世界);
+      sg.appendChild(窗);
+      yy += 窗高;
+    }
+
+    if (!收起没(s) && s.入口) for (const r of s.入口) {
+      const 入y = yy-5;
+      sg.appendChild(元('circle', { cx:bx, cy:入y, r:4, fill:色.脚, stroke:'#4a6b8a','stroke-width':1.3 }));
+      文(sg, bx+12, yy, r.名, { fill:'#7d95ad','font-size':10.5 });
+      文(sg, bx+70, yy, r.行, { fill:色.更弱,'font-size':9.5 });
+      实例.锚[s.名+'/入'+r.名] = { x:bx, y:入y, 空头: r.空头 };
+      yy += 行高;
+    }
+
+    if (!收起没(s) && s.出口) for (const o of s.出口) {
+      const 出y = yy-5;
+      sg.appendChild(元('circle', { cx:bx+bw, cy:出y, r:4, fill:色.脚, stroke:色.线,'stroke-width':1.3 }));
+      文(sg, bx+bw-12, yy, o.名, { fill:'#96804f','font-size':10.5,'text-anchor':'end' });
+      文(sg, bx+13, yy, o.行, { fill:色.更弱,'font-size':9.5 });
+      实例.锚[s.名+'/出'+o.名] = { x:bx+bw, y:出y, 到:o.到, 条件:o.条件 };
+      yy += 行高;
+    }
+
+    g.appendChild(sg);
+    y += bh + 9;
+  }
+
+  条.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); 条.setPointerCapture(e.pointerId);
+    实例.拖 = { 起: 世界坐标(e), 原x: 实例.x, 原y: 实例.y };
+  });
+  条.addEventListener('pointermove', (e) => {
+    if (!实例.拖) return;
+    const 现 = 世界坐标(e);
+    实例.x = 实例.拖.原x + (现.x - 实例.拖.起.x);
+    实例.y = 实例.拖.原y + (现.y - 实例.拖.起.y);
+    g.setAttribute('transform', `translate(${实例.x},${实例.y})`);
+    重画线();
+  });
+  条.addEventListener('pointerup', (e) => {
+    实例.拖 = null; try{ 条.releasePointerCapture(e.pointerId); }catch{}
+  });
+
+  画布.appendChild(g);
+}
+
+// ---------- 空头节点：自己一块，能拖 ----------
+function 建空头(空) {
+  const 宽 = 空.来源.length * 7.4 + 34, 高 = 30;
+  空.宽 = 宽; 空.高 = 高;
+  const g = 元('g', { transform:`translate(${空.x},${空.y})`, style:'cursor:grab' });
+  空.g = g;
+
+  g.appendChild(元('rect', { x:0, y:0, width:宽, height:高, rx:15,
+    fill:'#101319', stroke:'#4a4560', 'stroke-width':1.1, 'stroke-dasharray':'5 4' }));
+  文(g, 宽/2, 19, 空.来源, { fill:'#7f7799','font-size':10.5,'text-anchor':'middle' });
+  // 条件挂在框下方，更弱 —— 它是这张凭据的脚注
+  文(g, 0, -8, 空.条件, { fill:'#4d4763','font-size':9.5 });
+
+  // 整个框都能拖（它没有"里面"）
+  g.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); g.setPointerCapture(e.pointerId);
+    空.拖 = { 起: 世界坐标(e), 原x: 空.x, 原y: 空.y };
+  });
+  g.addEventListener('pointermove', (e) => {
+    if (!空.拖) return;
+    const 现 = 世界坐标(e);
+    空.x = 空.拖.原x + (现.x - 空.拖.起.x);
+    空.y = 空.拖.原y + (现.y - 空.拖.起.y);
+    g.setAttribute('transform', `translate(${空.x},${空.y})`);
+    重画线();
+  });
+  g.addEventListener('pointerup', (e) => {
+    空.拖 = null; try{ g.releasePointerCapture(e.pointerId); }catch{}
+  });
+
+  画布.appendChild(g);
+}
+
+function 重画线() {
+  连线层.textContent = '';
+
+  // 空头 → 它的入口：虚线，因为它不是真的调用，只是一张凭据
+  for (const 空 of 场景.空头们) {
+    const 目标实例 = 场景.实例们.find(i => i.id === 空.连到.实例);
+    if (!目标实例) continue;
+    const 键 = 空.连到.脚本 + '/入' + 空.连到.入口;
+    const 锚 = 目标实例.锚[键];
+    if (!锚) continue;
+    // 起点要从框「里面」出发，不是贴着边框。
+    // 贴边的话虚线图案在框的圆角断开，看着像两根东西碰了一下 —— 断联。
+    // 往左退 12 进去，被框的底色盖住，视觉上就是一根线从框里长出来。
+    const 起x = 空.x + 空.宽 - 12, 起y = 空.y + 空.高/2;
+    const 终x = 目标实例.x + 锚.x, 终y = 目标实例.y + 锚.y;
+    const mx = (起x+终x)/2;
+    连线层.appendChild(元('path', {
+      d:`M ${起x} ${起y} C ${mx} ${起y}, ${mx} ${终y}, ${终x-5} ${终y}`,
+      fill:'none', stroke:'#4a4560','stroke-width':1.2,'stroke-dasharray':'4 3'
+    }));
+    连线层.appendChild(元('path', { d:`M ${终x-5} ${终y} l -7 -3.5 l 0 7 z`, fill:'#4a4560' }));
+  }
+
+  for (const 实例 of 场景.实例们) {
+    for (const k in 实例.锚) {
+      const o = 实例.锚[k];
+      if (!o.到) continue;
+      const 目标 = 场景.实例们.find(i => i.id === o.到);
+      if (!目标) continue;
+      const 起x = 实例.x+o.x, 起y = 实例.y+o.y;
+      const 终x = 目标.x-5, 终y = 目标.y+72;
+      const mx = (起x+终x)/2;
+
+      连线层.appendChild(元('path', {
+        d:`M ${起x} ${起y} C ${mx} ${起y}, ${mx} ${终y}, ${终x} ${终y}`,
+        fill:'none', stroke:色.线, 'stroke-width':1.2, opacity:0.75
+      }));
+      连线层.appendChild(元('path', { d:`M ${终x} ${终y} l -7 -3.5 l 0 7 z`, fill:色.线, opacity:0.9 }));
+
+      // 条件：直接写在线旁，不套框。
+      // 上一版用亮黄虚线框，它成了全图最抢眼的东西 —— 一个注释不该比正文还响。
+      const 中x = mx, 中y = (起y+终y)/2;
+      const 宽 = o.条件.length*6.6+16;
+      连线层.appendChild(元('rect', { x:中x-宽/2, y:中y-13, width:宽, height:18, rx:3,
+        fill:'#0e1116', opacity:0.92 }));
+      文(连线层, 中x, 中y, o.条件, { fill:'#8a7649','font-size':9.5,'text-anchor':'middle' });
+    }
+  }
+}
+
+for (const 实例 of 场景.实例们) 建实例(实例);
+for (const 空 of 场景.空头们) 建空头(空);
+重画线();
+
+// 图例：只说明"什么颜色是什么意思"，不解释结构 —— 结构应该一眼看懂，不用查表。
+// 画在 HTML 层，不画在 SVG 里，否则会跟着缩放一起变大变小。
+[
+  ['#3a4757','脚本', ''],
+  [色.名,'数据名', ''],
+  [色.值,'数据值', ''],
+  [色.线,'连线 / 出口', ''],
+  ['#4a4560','空头（来源不在图上）', '圈'],
+].forEach(([c,t,类])=>{
+  document.getElementById('图例').insertAdjacentHTML('beforeend',
+    `<span><i class="${类}" style="background:${c}"></i>${t}</span>`);
+});
+应用视();
+</script>
+</body>
+</html>

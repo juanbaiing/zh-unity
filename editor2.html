@@ -76,10 +76,17 @@
   .en{font-size:10px;color:#4a5568;font-style:italic;user-select:none;
     flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
-  .stage{flex:5 1 0;overflow:auto;min-width:260px}
-  #world{position:relative;width:2400px;height:1600px;
+  .stage{flex:5 1 0;overflow:hidden;min-width:260px;position:relative;cursor:grab}
+  .stage.平移中{cursor:grabbing}
+  /* 画布靠 transform 缩放，不重排 —— 块的位置一直是那套画布坐标 */
+  #world{position:relative;width:2400px;height:1600px;transform-origin:0 0;
     background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:#4a5568;font-size:12px}
+  #比例牌{position:absolute;right:10px;bottom:8px;font-size:11px;color:#4a5568;
+    pointer-events:none;user-select:none;z-index:5}
+  #去原点{position:absolute;right:10px;bottom:26px;font-size:11px;color:#4a5568;
+    cursor:pointer;user-select:none;z-index:5}
+  #去原点:hover{color:#c8d2da}
 
   /* 所有块都是绝对定位 —— 画布上自由摆，容器里也自由摆 */
   .blk{position:absolute;background:#171c25;border:1px solid #2b3341;
@@ -277,6 +284,8 @@
 
   <section class="stage">
     <div id="world"><div id="hintEmpty">从左边点一个块开始</div></div>
+    <div id="比例牌">100%</div>
+    <div id="去原点" title="回到原点，100%">复位</div>
   </section>
 
   <section class="mid" id="midLayer">
@@ -307,6 +316,83 @@ const 世界 = document.getElementById('world');
 const 舞台 = document.querySelector('.stage');
 const out = document.getElementById('out');
 const 警告 = document.getElementById('warn');
+
+// ══════════════════════════════════════════════════
+//  画布缩放
+//
+//  #world 是 2400×1600 的固定画布，缩靠 transform，不重排。
+//  块的位置一直是「画布坐标」；屏幕上看到多少由 视 决定。
+//  拖拽时拿到的都是屏幕坐标，换算回来要除以 视.z。
+// ══════════════════════════════════════════════════
+const 视 = { x: 0, y: 0, z: 1 };
+
+function 应用视() {
+  世界.style.transform = `translate(${视.x}px,${视.y}px) scale(${视.z})`;
+  const 牌 = document.getElementById('比例牌');
+  if (牌) 牌.textContent = Math.round(视.z * 100) + '%';
+}
+
+舞台.addEventListener('wheel', e => {
+  if (e.ctrlKey) return;
+  e.preventDefault();
+  const 前 = 视.z;
+  const 后 = Math.min(3, Math.max(0.2, 前 * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+  // 光标指着的那一点，缩放前后要停在原地
+  const r = 舞台.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  视.x = mx - (mx - 视.x) * (后 / 前);
+  视.y = my - (my - 视.y) * (后 / 前);
+  视.z = 后;
+  应用视();
+}, { passive: false });
+
+// 拖空白 = 平移。块自己会 stopPropagation，不会误触。
+let 平移 = null;
+舞台.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  if (e.target.closest('.blk') || e.target.closest('.palette')) return;
+  平移 = { sx: e.clientX, sy: e.clientY, ox: 视.x, oy: 视.y };
+  舞台.classList.add('平移中');
+});
+addEventListener('pointermove', e => {
+  if (!平移) return;
+  视.x = 平移.ox + (e.clientX - 平移.sx);
+  视.y = 平移.oy + (e.clientY - 平移.sy);
+  应用视();
+});
+addEventListener('pointerup', () => {
+  if (!平移) return;
+  平移 = null;
+  舞台.classList.remove('平移中');
+});
+
+// 把视野对准所有块 —— 换工程、整理完之后用
+function 对准块() {
+  const 块们 = [...世界.querySelectorAll('.blk')].filter(el => el.offsetParent);
+  if (!块们.length) { 视.x = 40; 视.y = 40; 视.z = 1; 应用视(); return; }
+  const wr = 世界.getBoundingClientRect();
+  const z = 视.z || 1;
+  let 左 = Infinity, 上 = Infinity, 右 = -Infinity, 下 = -Infinity;
+  for (const el of 块们) {
+    const r = el.getBoundingClientRect();
+    左 = Math.min(左, (r.left - wr.left) / z);
+    上 = Math.min(上, (r.top - wr.top) / z);
+    右 = Math.max(右, (r.right - wr.left) / z);
+    下 = Math.max(下, (r.bottom - wr.top) / z);
+  }
+  if (!isFinite(左)) return;
+  const sr = 舞台.getBoundingClientRect();
+  const 边 = 40;
+  const 宽 = Math.max(1, 右 - 左), 高 = Math.max(1, 下 - 上);
+  const 新z = Math.min(1.3, Math.max(0.25,
+    Math.min((sr.width - 边 * 2) / 宽, (sr.height - 边 * 2) / 高)));
+  视.z = 新z;
+  视.x = (sr.width - 宽 * 新z) / 2 - 左 * 新z;
+  视.y = (sr.height - 高 * 新z) / 2 - 上 * 新z;
+  应用视();
+}
+
+document.getElementById('去原点').onclick = () => { 视.x = 40; 视.y = 40; 视.z = 1; 应用视(); };
 
 // 每块自己的坐标都相对它所在的画布（顶层相对 #world，容器内相对 .body）
 function 建(类型, x, y) {
@@ -681,12 +767,14 @@ function 布局(根们) {
   for (const el of 世界.querySelectorAll('.blk')) {
     const id = Number(el.dataset.id);
     const 头 = el.querySelector(':scope > .head');
-    if (头) 头高.set(id, 头.getBoundingClientRect().height);
+    // ⚠️ 一律用 offsetWidth/offsetHeight，**不能**用 getBoundingClientRect。
+    //    后者是缩放后的屏幕尺寸；画布缩到 0.6 时量出来只有六成，
+    //    内容区就被设窄，容器右边界装不下里面的块 —— 而且拖一次量一次，越拖越歪。
+     if (头) 头高.set(id, 头.offsetHeight);
     段头高.set(id, [...el.querySelectorAll(':scope > .branch > .head')]
-      .map(x => x.getBoundingClientRect().height));
+      .map(x => x.offsetHeight));
     if (!el.querySelector(':scope > .body')) {
-      const r = el.getBoundingClientRect();
-      叶.set(id, { 宽: r.width, 高: r.height });
+      叶.set(id, { 宽: el.offsetWidth, 高: el.offsetHeight });
     }
   }
 
@@ -818,7 +906,9 @@ let 这格多高 = 76;      // 这一格向下让出多少 —— 按「要放�
 
 // 一格刚好放得下这一块，再留点空
 function 一格高度(块el) {
-  const h = 块el ? 块el.getBoundingClientRect().height : 32;
+  // 用 offsetHeight：这是布局高，不受画布缩放影响。
+  // 拿 getBoundingClientRect 的话，缩到 0.6 时这一格只有六成高，块塞不进去。
+  const h = 块el ? 块el.offsetHeight : 32;
   return Math.max(40, Math.round(h) + 22);
 }
 
@@ -894,8 +984,9 @@ function 开始拖(b, el, 起始) {
   根块们.push(b);
 
   const wr0 = 世界.getBoundingClientRect();
-  b.x = 起始rect.left - wr0.left;
-  b.y = 起始rect.top - wr0.top;
+  // getBoundingClientRect 是屏幕坐标，b.x/b.y 是画布坐标。缩放过的画布要除 z。
+  b.x = (起始rect.left - wr0.left) / 视.z;
+  b.y = (起始rect.top - wr0.top) / 视.z;
 
   // 拖的时候把块挂到 body 上用 fixed 跟手，不再放回 #world。
   // 留在 .stage 里的话，一拖出画布边缘就被 overflow 裁掉 —— 看着像「拖出来只剩半截」。
@@ -905,8 +996,12 @@ function 开始拖(b, el, 起始) {
   el.style.left = '0';
   el.style.top = '0';
   el.style.margin = '0';
-  el.style.width = Math.round(起始rect.width) + 'px';   // 锁宽，免得换行改了高度
-  el.style.transform = `translate(${起始rect.left}px, ${起始rect.top}px)`;
+  // ⚠️ 宽度要用**布局宽**（offsetWidth），不能用 起始rect.width。
+  //    后者是缩放后的屏幕宽；块离开画布就没有 scale(z) 了，
+  //    拿屏幕宽当布局宽写死，块会当场胀大（z<1 时）或缩水（z>1 时）。
+  el.style.width = el.offsetWidth + 'px';
+  el.style.transformOrigin = '0 0';
+  el.style.transform = `translate(${起始rect.left}px, ${起始rect.top}px) scale(${视.z})`;
   el.style.pointerEvents = 'none';   // 让底下的内容区能被 elementFromPoint 找到
 
   const 新el = el;
@@ -915,10 +1010,11 @@ function 开始拖(b, el, 起始) {
 
   const 移 = ev => {
     const wx = 世界.getBoundingClientRect();
-    b.x = ev.clientX - wx.left - 抓x;
-    b.y = ev.clientY - wx.top - 抓y;
-    // 屏幕上跟手用视口坐标；b.x/b.y 是画布坐标，松手写回树上用那个
-    新el.style.transform = `translate(${ev.clientX - 抓x}px, ${ev.clientY - 抓y}px)`;
+    b.x = (ev.clientX - wx.left - 抓x) / 视.z;
+    b.y = (ev.clientY - wx.top - 抓y) / 视.z;
+    // 拖的时候保持同一个缩放，视觉上才和原来一样大
+    新el.style.transform =
+      `translate(${ev.clientX - 抓x}px, ${ev.clientY - 抓y}px) scale(${视.z})`;
 
     // 鼠标底下是哪个内容区；顺带把它的宿主容器放大一点做提示
     const 下 = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -978,11 +1074,11 @@ function 开始拖(b, el, 起始) {
       if (宿主id && !树.找位置([b], 宿主id)) {
         const 宿主位 = 树.找位置(根块们, 宿主id);
         if (宿主位) {
-          // b.x/b.y 已经是世界坐标，直接换算成相对这个内容区
+          // b.x/b.y 已经是画布坐标，直接换算成相对这个内容区
           const 盒rect = 悬停盒.getBoundingClientRect();
           const 世界rect = 世界.getBoundingClientRect();
-          b.x = Math.max(4, b.x - (盒rect.left - 世界rect.left));
-          b.y = Math.max(4, b.y - (盒rect.top - 世界rect.top));
+          b.x = Math.max(4, b.x - (盒rect.left - 世界rect.left) / 视.z);
+          b.y = Math.max(4, b.y - (盒rect.top - 世界rect.top) / 视.z);
 
           根块们 = 根块们.filter(x => x !== b);
           // 找这个盒属于哪个列表（子 or 某分支）
@@ -1000,7 +1096,9 @@ function 开始拖(b, el, 起始) {
         根块们.push(b);
       }
     }
-    重画();
+    // ⚠️ 用 重画(true) 跳过重叠整理：这次是「你把它放在这儿」，
+    //    再让 布局() 按防重叠规则把它推开，就变成「拖一下弹回原处/弹到别处」。
+    重画(true);
   };
 
   document.addEventListener('pointermove', 移);
@@ -1096,8 +1194,9 @@ function 挂托盘(c, 类型) {
       const el0 = 世界.querySelector(`.blk[data-id="${块.id}"]`);
       if (el0) {
         const r0 = el0.getBoundingClientRect();
-        块.x = 块.x + (cx - 落点偏移x) - r0.left;
-        块.y = 块.y + (cy - 落点偏移y) - r0.top;
+        // 右边是屏幕像素，块坐标是画布坐标 —— 缩放时差一个 z
+        块.x = 块.x + ((cx - 落点偏移x) - r0.left) / 视.z;
+        块.y = 块.y + ((cy - 落点偏移y) - r0.top) / 视.z;
         重画(true);
       }
       return { 块, el: 世界.querySelector(`.blk[data-id="${块.id}"]`) };
@@ -1295,6 +1394,8 @@ function 切到工程(名) {
   重画();
   画标签();
   刷新本份标签();
+  // 换工程后视野对准这个工程的块（重画完才有 DOM 可量）
+  requestAnimationFrame(对准块);
 }
 
 function 新工程() {
@@ -1843,6 +1944,9 @@ if (!读盘()) {
 画标签();
 刷新本份标签();
 重画();
+// 一开始就把视野对准这个工程的块 —— 不然块在画布远处，打开就是一片空白
+应用视();
+requestAnimationFrame(对准块);
 </script>
 </body>
 </html>

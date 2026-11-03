@@ -1,0 +1,63 @@
+-- 中文套式 · 关系库
+--
+-- 一棵树放代码，一棵树放场景，中间靠一条「实例化」边连起来。
+-- 所有身份都是点分路径，跟文件夹一样：
+--
+--   场景   SampleScene
+--   物体   SampleScene.Canvas.Slider
+--   组件   SampleScene.Canvas.Slider.HpBar
+--   脚本   HpBar
+--   方法   HpBar.Update
+--   字段   HpBar.playerData
+--
+-- 主键前面带树标记（场景| / 代码|），因为场景名和类名可能重名 ——
+-- 有个场景叫 Enemy、同时有个类叫 Enemy，一点都不奇怪。
+-- 这个前缀只在库里用，显示时切掉。
+
+PRAGMA journal_mode = WAL;
+PRAGMA busy_timeout = 5000;
+
+CREATE TABLE IF NOT EXISTS 节点 (
+    id    TEXT PRIMARY KEY,
+    树    TEXT NOT NULL,          -- 场景 | 代码
+    类型  TEXT NOT NULL,          -- 场景 | 物体 | 组件 | 脚本 | 方法 | 字段
+    名字  TEXT NOT NULL,          -- 路径末段，用来搜索
+    父    TEXT,                   -- 上级 id，构成树
+    文件  TEXT,                   -- 出自哪个源文件
+    附加  TEXT                    -- JSON 载荷（tag、字段类型、行号……）
+);
+
+CREATE INDEX IF NOT EXISTS ix_节点_树类型 ON 节点(树, 类型);
+CREATE INDEX IF NOT EXISTS ix_节点_名字   ON 节点(名字);
+CREATE INDEX IF NOT EXISTS ix_节点_父     ON 节点(父);
+
+CREATE TABLE IF NOT EXISTS 边 (
+    自    TEXT NOT NULL,
+    到    TEXT NOT NULL,
+    种类  TEXT NOT NULL,          -- 实例化 | 引用 | 取组件 | 查找 | 调用
+    来源  TEXT NOT NULL,          -- 扫描 | 人工
+    行    INTEGER,
+    原文  TEXT,
+    附加  TEXT,
+    PRIMARY KEY (自, 到, 种类, 来源)
+);
+
+CREATE INDEX IF NOT EXISTS ix_边_自   ON 边(自);
+CREATE INDEX IF NOT EXISTS ix_边_到   ON 边(到);
+CREATE INDEX IF NOT EXISTS ix_边_种类 ON 边(种类);
+
+-- 图的摆位：是你说的地方就存这儿，重新扫描不会冲掉
+CREATE TABLE IF NOT EXISTS 布局 (
+    id   TEXT PRIMARY KEY,
+    x    REAL NOT NULL,
+    y    REAL NOT NULL,
+    宽   REAL,
+    高   REAL,
+    收起 INTEGER NOT NULL DEFAULT 0
+);
+
+-- 这份库是谁、什么时候扫的
+CREATE TABLE IF NOT EXISTS 元信息 (
+    键 TEXT PRIMARY KEY,
+    值 TEXT
+);
