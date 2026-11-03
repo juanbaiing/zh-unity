@@ -16,26 +16,33 @@
   #图例 i.圈{border-radius:50%;background:none!important;border:1.3px dashed #4a4560}
   #提示{position:fixed;left:16px;top:14px;font-size:11px;color:#39434f;
     pointer-events:none;z-index:9}
-  /* ---- 窗口里的真块：从 zh-csharp-lab 搬过来的那套 ---- */
-  .窗块{position:relative;background:#171c25;border:1px solid #2b3341;
-    border-left:3px solid #3a4757;border-radius:5px;margin:0 0 6px 0;
-    font:12.5px "Cascadia Code",Consolas,monospace;color:#c9d4e3;white-space:nowrap}
-  .窗块.容{background:#141922;border-left-color:#5a3f8a}
-  .窗块 .头{display:flex;align-items:center;gap:5px;padding:5px 8px;
-    cursor:move;user-select:none;flex-wrap:nowrap}
-  .窗块 .号{font-size:10px;color:#5a6478;min-width:14px;text-align:center;
-    border-right:1px solid #2b3341;padding-right:4px;user-select:none}
-  .窗块 .类{font-size:10px;color:#7b8494;background:#1f2632;padding:0 5px;border-radius:3px}
-  .窗块 .填{color:#7ee787;border:1px solid transparent;border-radius:3px;padding:0 5px;
-    outline:none;background:#12161d;font:11.5px "Cascadia Code",Consolas,monospace;
-    height:20px;line-height:18px;cursor:text}
-  .窗块 .填:focus{border-color:#7ee787;background:#0d1117}
-  .窗块 .填::placeholder{color:#4a5568}
-  .窗块 .钮{color:#6b7688;cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
-  .窗块 .钮:hover{color:#7ee787}
-  .窗块 .体{margin:0 8px 8px 16px;padding:6px;
-    border:1px dashed #2b3341;border-radius:4px;min-height:26px;background:#10151c}
-  .窗块 .体:empty::after{content:'拖块进来';color:#39424f;font-size:11px}
+  /* ---- 窗口里的真块 ----
+     照原设计（unity-graph-lab 第五版）那三条来，不是随手配的：
+       ① 颜色只编码含义 —— 脚本青灰蓝、数据暗绿，其余全灰阶
+       ② 装饰不带信息就删 —— 块本身没有底色、没有边框、没有圆角底色；
+          值用一条细下划线，输入框的方框全拆了
+       ③ 对比用在结构上 —— 正文压暗，最亮那一点留给连线
+     原来那套是从块编辑器直接搬来的：方框 + 左边 3px 色条 + #7ee787 荧光绿 + #5a3f8a 紫。
+     在编辑器里那是块，在这里它是图上的内容 —— 换个场景就得换一套克制的语言。 */
+  .窗块{position:relative;padding:1px 0;margin:0 0 3px 0;
+    font:12.5px "Cascadia Code",Consolas,monospace;color:#a9b4c2;white-space:nowrap}
+  .窗块 .头{display:flex;align-items:center;gap:6px;padding:2px 3px;
+    cursor:move;user-select:none;flex-wrap:nowrap;border-radius:3px}
+  .窗块 .头:hover{background:#151a21}
+  .窗块 .号{font-size:9.5px;color:#39434f;min-width:13px;text-align:right;user-select:none}
+  .窗块 .类{font-size:10px;color:#5d6b7d}
+  .窗块 .填{color:#5f9e7a;border:0;border-bottom:1px solid transparent;border-radius:0;
+    padding:0 2px;outline:none;background:none;
+    font:11.5px "Cascadia Code",Consolas,monospace;height:19px;line-height:19px;cursor:text}
+  .窗块 .填:hover{border-bottom-color:#28313d}
+  .窗块 .填:focus{border-bottom-color:#5f9e7a}
+  .窗块 .填::placeholder{color:#39434f}
+  .窗块 .钮{color:#4b5d72;cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
+  .窗块 .钮:hover{color:#c8d2de}
+  /* 容器块：一条细竖线说明「这些在它里面」—— 这是结构，不是装饰 */
+  .窗块 .体{margin:1px 0 1px 15px;padding-left:9px;
+    border-left:1px solid #242c37;min-height:18px}
+  .窗块 .体:empty::after{content:'空';color:#39434f;font-size:10.5px}
 
   #控{position:fixed;right:14px;top:14px;display:flex;gap:8px;align-items:center;z-index:9}
   #控 button{background:#161a21;color:#7b8494;border:1px solid #252b36;border-radius:5px;
@@ -131,7 +138,14 @@ const 正文字号 = 11;              // 画布里正文原本多大
 // 判据不是倍率，是「字在屏幕上有多少像素」——
 // 倍率是拍脑袋的，「小于 8px 读不动」是量出来的。
 // 8px 是舒服的阅读下限；24px 以上说明已经凑得很近了，该给更多细节。
-function 屏幕字号(){ return 正文字号 * (原点.w / 视.w); }
+// ⚠️ 分母必须用【屏幕像素宽】，不是 原点.w。
+//    原点.w 是「内容包围盒宽」—— 原点 = 视 的时候它恒等于 视.w，
+//    判据永远算出 11px、永远判「档 1」，而屏幕上其实只有 5.6px。
+//    原来 原点 写死 1400、窗口 1463，两者差不多，凑巧看不出来。
+function 屏幕字号(){
+  const 屏宽 = 画布.getBoundingClientRect().width || 原点.w;
+  return 正文字号 * (屏宽 / 视.w);
+}
 function 算档(){
   const 字 = 屏幕字号();
   if (字 < 8) return 0;
@@ -184,7 +198,25 @@ for (const 实例 of 场景.实例们) 量实例(实例);
 // ---------- 视窗：缩放和平移 ----------
 // 不缩放元素本身，只改「看的窗口」（viewBox）。
 // 这样里面的东西永远按新尺寸重新画，缩到哪一级都是清楚的，不会糊。
-const 原点 = { x: 0, y: 0, w: 1400, h: 860 };
+// 视窗按内容包围盒定，不写死 1400×860。
+// 原点是三样东西：初始视野、「复位」回的地方、档位判据的分母。
+// 写死的话实例一多就散到画布外，一按复位就再也找不全 —— 看着像"东西没了"。
+const 原点 = (function () {
+  const 画r = 画布.getBoundingClientRect();
+  const 窗比 = (画r.width || 1400) / (画r.height || 860);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const 实 of 场景.实例们) {
+    x0 = Math.min(x0, 实.x); y0 = Math.min(y0, 实.y);
+    x1 = Math.max(x1, 实.x + 实.w); y1 = Math.max(y1, 实.y + 实.h);
+  }
+  if (!(x1 > x0)) return { x: 0, y: 0, w: 1400, h: 860 };
+  const 边 = 70;
+  let w = x1 - x0 + 边 * 2, h = y1 - y0 + 边 * 2;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  // 跟窗口同宽高比，否则 preserveAspectRatio 会留一条边
+  if (w / h < 窗比) w = h * 窗比; else h = w / 窗比;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+})();
 const 视 = { ...原点 };
 
 function 应用视() {

@@ -98,6 +98,22 @@ namespace 图数据
             var 按物 = 组节点.GroupBy(n => n.父 ?? "").ToList();
             按物.Sort((a, b) => 组热度(b.Key, 被引).CompareTo(组热度(a.Key, 被引)));
 
+            // 摆位：按网格，不用黄金角螺旋。
+            // 螺旋的半径是 430×圈 —— 第 6 个就飞到 1290 外，而画布才 1400 宽，
+            // 一半的框直接摆到画布外面。打开只看得见三个，看着像"东西少了"，
+            // 其实是摆到看不见的地方去了（实测 6 个实例落在 x −757~1558、y −727~1500）。
+            // 网格稳当：列数算得出来，每行多高也估得出来，不出界。
+            var 估高 = 按物.Select(g => 44 + g.Count() * 215 + 8).ToList();
+            var 列数 = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Max(1, 按物.Count))));
+            var 逐行高 = new List<double>();
+            for (var i = 0; i < 按物.Count; i++)
+            {
+                var 行号 = i / 列数;
+                while (逐行高.Count <= 行号) 逐行高.Add(0);
+                逐行高[行号] = Math.Max(逐行高[行号], 估高[i]);
+            }
+            const double 格宽 = 470, 格缝 = 60;
+
             var 序号 = 0;
             foreach (var 组 in 按物)
             {
@@ -117,16 +133,13 @@ namespace 图数据
                     catch { }
                 }
 
-                // 摆位：第一个放原点，其余按黄金角螺旋铺开
-                double x = 90, y = 130;
-                if (序号 > 0)
-                {
-                    var 圈 = Math.Ceiling(Math.Sqrt(序号));
-                    var 角 = 序号 * 2.399963;
-                    var 半径 = 圈 * 430;
-                    x = Math.Round(90 + Math.Cos(角) * 半径);
-                    y = Math.Round(130 + Math.Sin(角) * 半径);
-                }
+                // 摆位：网格。列 = 序号 % 列数，行 = 序号 / 列数。
+                // 每行的 y 是前面各行高度的累加 —— 高的实例不会压到下一行的头。
+                var 列号 = 序号 % 列数;
+                var 行序 = 序号 / 列数;
+                double x = 90 + 列号 * 格宽;
+                double y = 130;
+                for (var r = 0; r < 行序; r++) y += 逐行高[r] + 格缝;
                 序号++;
 
                 var 脚本们 = new List<object>();
@@ -169,8 +182,26 @@ namespace 图数据
 
                             foreach (var e in 出边[法.id])
                             {
-                                var 到 = e.到.Substring(e.到.IndexOf('|') + 1);
-                                出口们.Add(new { 名 = 法.名字, 行 = "", 到, 条件 = e.原文 ?? "" });
+                                // ⚠️ 这里原来写的是**类名**（"EnemyHp"），可模板画线要的是**实例 id**
+                                //    （"场景|SampleScene.enemy"）。两边格式对不上，于是
+                                //    场景.实例们.find(i => i.id === o.到) 永远查不到 —— 一条线都画不出来。
+                                //    图上只剩几个孤立的框，看着就是"不好看"，其实线全丢了。
+                                //    现在解析成挂着这个类的实例 id；场景里没有它（纯代码引用）
+                                //    就留 null：画不出来就是画不出来，别假装连上了。
+                                var 目标类型 = e.到.Substring(e.到.IndexOf('|') + 1);
+                                var 点 = 目标类型.IndexOf('.');
+                                if (点 > 0) 目标类型 = 目标类型.Substring(0, 点);   // 调用边到的是「类.方法」
+                                string 到实例 = null;
+                                if (实例.TryGetValue(目标类型, out var 目标们2) && 目标们2.Count > 0)
+                                {
+                                    // ⚠️ 实例表里存的是**脚本节点 id**（场景|SampleScene.enemy.EnemyHp），
+                                    //    模板要比的却是**实例 id**（场景|SampleScene.enemy）——
+                                    //    差这一层，线照样画不出来。往上取一层父。
+                                    var 脚本id0 = 目标们2[0];
+                                    到实例 = 节点们.TryGetValue(脚本id0, out var 目标节点) && 目标节点.父 != null
+                                        ? 目标节点.父 : 脚本id0;
+                                }
+                                出口们.Add(new { 名 = 法.名字, 行 = "", 到 = 到实例, 到类型 = 目标类型, 条件 = e.原文 ?? "" });
                             }
                         }
                     }
