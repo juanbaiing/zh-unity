@@ -6,20 +6,41 @@
 <title>中文套式 · 自由画布</title>
 <style>
   :root{
-    /* 灰阶五档：底 / 面板 / 线 / 正文 / 弱化。其余散灰都往这五档上靠 */
-    --bg:#0f1115; --panel:#161a21; --line:#252b36; --text:#d7dce4; --dim:#7b8494;
-    /* 文字四档亮度 —— 眼睛能自己分层，不用一行行读 */
-    --字1:#e6ebf2;      /* 标题、块名、实例名：最亮 */
-    --字3:#9aa4b2;      /* 次要说明 */
-    --线亮:var(--线亮);     /* 比 --line 亮一档：内容区虚线框、分支分隔线 */
-    --槽:var(--槽);       /* 输入框底，比块底再深一点 */
-    --块底:var(--块底);     /* 块底 */
-    /* 四个块色：降饱和。原来那四个是 Tailwind 500 级（S 71~92%），
-       深色底上就是扎眼 —— 一眼能看出是谁挑的。
-       现在是 S 30~46%，还分得清"容器/语句/数据/条件"，但不喊了。 */
-    --kcontain:#8e63b6; --kstmt:#52986f; --kdata:#5b82b9; --kcond:#bd944c;
-    /* 语法高亮是内容不是装饰 —— 所以它该比块色显眼，但不用荧光 */
-    --cn:#8bd39b; --cs:#8ab4d8; --bad:#e07a7a;
+    /* 跟网状图同一套色 —— unity-graph-lab 第五版（commit 2cbca43）。
+       那边定的三条，这里照搬，不是为了好看：
+         ① 颜色只编码含义：青灰蓝 = 结构/行为，暗绿 = 值，其余全灰阶。
+            不是"每个类型一种颜色"—— 颜色不回答"这是第几个"。
+         ② 装饰不带信息就删：不加底色块、不加圆角底、不加阴影。
+         ③ 对比用在结构上：框边亮一点浮出背景，正文压暗，最亮那点留给重点。 */
+    --bg:#0b0e12;        /* 底 */
+    --panel:#151a21;     /* 面板 / 块底 */
+    --line:#242c37;      /* 边框 */
+    --text:#a9b4c2;      /* 正文 —— 压暗，久看不累 */
+    --dim:#5d6b7d;       /* 弱化 */
+    --字1:#c8d2de;       /* 最亮：标题、块名 */
+    --字3:#5d6b7d;       /* 次要说明 */
+    --字4:#39434f;       /* 极弱：类型名、占位提示 */
+    --线亮:#242c37;      /* 内容区虚线框、分支分隔线 */
+    --槽:#0b0e12;        /* 输入框底 */
+    --块底:#151a21;      /* 块底 */
+    --脚:#1a2028;        /* 容器块底，比语句块深一档 */
+    /* 四类块收成两组半 —— 原来那四个是 Tailwind 500 级，各喊各的，
+       没有一种在传递意思。
+         能装东西的（类/方法/构造函数）→ 青灰蓝，跟网状图里"脚本"一个色
+         承载值的（字段/属性/数组）  → 暗绿，跟网状图里"数据值"一个色
+         普通语句                     → 灰阶，不抢
+         条件                         → 暗金，跟网状图里"连线"一个色（它确实是分支） */
+    --kcontain:#6f8aa3;
+    --kstmt:#5d6b7d;
+    --kdata:#5f9e7a;
+    --kcond:#7a6a3f;
+    --cn:#5f9e7a;        /* 输入的值 = 数据值 */
+    --cs:#6f8aa3;        /* C# 预览 = 结构 */
+    --bad:#a06060;       /* 报错 */
+    --错底:#1a1214;      /* 报错条 / 拖回托盘 */
+    --错线:#3a2626;
+    --钮:#1b222b;        /* 按钮、下拉行、hover 底 */
+    --选:#16211b;        /* 选中 / 拖入高亮底 */
   }
   *{box-sizing:border-box}
   *::-webkit-scrollbar{width:10px;height:10px}
@@ -38,11 +59,11 @@
     border:1px solid var(--line);cursor:pointer;max-width:300px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
   .dirchip:hover{color:var(--cn);border-color:var(--cn)}
-  .dirchip.设过{color:#8fae9a}
+  .dirchip.设过{color:var(--dim)}
   .dirchip.文件{max-width:360px}
-  button{background:#1f2632;color:var(--text);border:1px solid var(--line);border-radius:6px;
+  button{background:var(--钮);color:var(--text);border:1px solid var(--line);border-radius:6px;
     padding:4px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
-  button:hover{background:#2a3342}
+  button:hover{background:var(--line)}
 
   /* 顶栏的标签页：一个标签 = 一张画布 = 一个 Unity 脚本 */
   .tabs{display:flex;flex:none;background:var(--槽);border-bottom:1px solid var(--line);
@@ -50,8 +71,8 @@
   .tabs::-webkit-scrollbar{height:4px}
   .tab{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;
     color:var(--dim);cursor:pointer;white-space:nowrap;border-top:2px solid transparent;
-    background:#161a21;user-select:none}
-  .tab:hover{color:var(--text);background:#1a2028}
+    background:var(--panel);user-select:none}
+  .tab:hover{color:var(--text);background:var(--脚)}
   .tab.active{background:var(--bg);color:var(--text);border-top-color:var(--cn)}
   .tab .x{opacity:0;font-size:10px;padding:0 2px}
   .tab:hover .x{opacity:.6}
@@ -70,7 +91,7 @@
   .chips{display:flex;flex-direction:column;gap:3px}
   .palette h2{font-size:10.5px;color:var(--dim);margin:0 0 6px}
   .palette h2.grp{font-size:10px;color:var(--dim);margin:8px 0 4px;padding-bottom:3px;
-    border-bottom:1px solid #232a36;letter-spacing:1px;cursor:pointer;
+    border-bottom:1px solid var(--钮);letter-spacing:1px;cursor:pointer;
     display:flex;align-items:center;gap:4px;user-select:none}
   .palette h2.grp:hover{color:var(--cn)}
   .grp-arrow{font-size:9px;transition:transform .12s;display:inline-block}
@@ -78,7 +99,7 @@
   .grp-sec.collapsed .chips{display:none}
 
   .chip{padding:4px 8px;border-radius:5px;cursor:grab;user-select:none;
-    border:1px dashed #3a4354;background:#1a1f28;font-size:11.5px;
+    border:1px dashed var(--line);background:var(--panel);font-size:11.5px;
     display:flex;align-items:baseline;gap:5px;white-space:nowrap;
     overflow:hidden;min-width:0}
   .chip:hover{border-color:var(--cn);color:var(--cn)}
@@ -91,13 +112,13 @@
   .stage.平移中{cursor:grabbing}
   /* 画布靠 transform 缩放，不重排 —— 块的位置一直是那套画布坐标 */
   #world{position:relative;width:2400px;height:1600px;transform-origin:0 0;
-    background:radial-gradient(circle,#1b212b 1px,transparent 1px) 0 0/22px 22px}
+    background:radial-gradient(circle,var(--panel) 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:var(--dim);font-size:12px}
   #比例牌{position:absolute;right:10px;bottom:8px;font-size:11px;color:var(--dim);
     pointer-events:none;user-select:none;z-index:5}
   #去原点{position:absolute;right:10px;bottom:26px;font-size:11px;color:var(--dim);
     cursor:pointer;user-select:none;z-index:5}
-  #去原点:hover{color:#c8d2da}
+  #去原点:hover{color:var(--字1)}
 
   /* 所有块都是绝对定位 —— 画布上自由摆，容器里也自由摆 */
   .blk{position:absolute;background:var(--块底);border:1px solid var(--线亮);
@@ -109,7 +130,7 @@
   .blk[data-t="多分支"],.blk[data-t="遇"],.blk[data-t="其他"],
   .blk[data-t="尝试"],.blk[data-t="捕获"],.blk[data-t="读按键"]{border-left-color:var(--kcond)}
   .blk[data-t="字段"],.blk[data-t="属性"],.blk[data-t="数组"],.blk[data-t="新建列表"]{border-left-color:var(--kdata)}
-  .blk.容器{background:#141922}
+  .blk.容器{background:var(--脚)}
   .blk.dragging{opacity:.85;z-index:999}
   .blk.孤岛{border-color:var(--bad);border-left-color:var(--bad)}
 
@@ -119,11 +140,11 @@
     cursor:move;user-select:none;white-space:nowrap}
   .ord{font-size:10px;color:var(--dim);min-width:14px;text-align:center;
     border-right:1px solid var(--线亮);padding-right:4px;user-select:none}
-  .kind{font-size:10px;color:var(--字3);background:#1f2632;padding:0 5px;border-radius:3px}
+  .kind{font-size:10px;color:var(--字3);background:var(--钮);padding:0 5px;border-radius:3px}
   .fld{color:var(--cn);border:1px solid transparent;border-radius:3px;padding:0 5px;color-scheme:dark;
     outline:none;background:var(--槽);font-size:11.5px;font-family:inherit;
     height:20px;line-height:18px;vertical-align:middle;cursor:text}
-  .fld:focus{border-color:var(--cn);background:#0d1117}
+  .fld:focus{border-color:var(--cn);background:var(--槽)}
   .fld::placeholder{color:var(--dim)}
   .ctl{color:var(--dim);cursor:pointer;padding:0 4px;user-select:none;font-size:11px}
   .ctl:hover{color:var(--cn)}
@@ -132,27 +153,27 @@
   .ctl.选:hover{color:var(--cn)}
 
   .选项层{position:fixed;z-index:9998;min-width:130px;max-width:340px;max-height:280px;
-    overflow:auto;padding:4px;background:#1a2029;border:1px solid #2f3a49;
+    overflow:auto;padding:4px;background:var(--panel);border:1px solid var(--line);
     border-radius:6px;box-shadow:0 10px 30px #000b}
-  .选项行{padding:4px 9px;border-radius:4px;color:#c3ccd8;font-size:11.5px;
+  .选项行{padding:4px 9px;border-radius:4px;color:var(--text);font-size:11.5px;
     cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .选项行:hover{background:#243040;color:var(--cn)}
-  .选项行.选中{color:var(--cn);background:#1c2a22}
+  .选项行:hover{background:var(--钮);color:var(--cn)}
+  .选项行.选中{color:var(--cn);background:var(--选)}
 
   .ctl.问{font-weight:bold;font-size:12px;padding:0 5px}
   .ctl.问:hover{color:var(--cn)}
 
   .简介卡{position:fixed;z-index:9997;pointer-events:none;max-width:260px;
-    padding:6px 10px;background:#1c232e;border:1px solid #364253;
+    padding:6px 10px;background:var(--panel);border:1px solid var(--line);
     border-radius:6px;box-shadow:0 6px 20px #000a;
-    font-size:11.5px;line-height:1.6;color:#c3ccd8;white-space:normal}
+    font-size:11.5px;line-height:1.6;color:var(--text);white-space:normal}
   .简介卡 b{color:var(--cn);font-weight:normal;margin-right:6px}
   .简介卡 b::after{content:'·';color:var(--dim);margin-left:6px}
 
   .说明卡{position:fixed;z-index:9999;max-width:330px;padding:10px 13px;
-    background:#1a2029;border:1px solid #2f3a49;border-left:3px solid var(--cn);
+    background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--cn);
     border-radius:7px;box-shadow:0 10px 30px #000b;
-    font-size:12px;line-height:1.7;color:#c3ccd8;white-space:normal}
+    font-size:12px;line-height:1.7;color:var(--text);white-space:normal}
   .说明头{margin-bottom:5px}
   .说明头 b{color:var(--cn);font-size:13px;margin-right:7px}
   .说明头 .en{font-size:10.5px;color:var(--dim);font-style:italic}
@@ -163,7 +184,7 @@
     border:1px dashed var(--线亮);border-radius:5px;
     min-width:var(--w, 120px);
     min-height:var(--h, 56px);
-    background:#10151c}
+    background:var(--槽)}
   /* 不要给 min-width/min-height 加 transition。
      尺寸是「算出来写死」的，过渡会让写入值和实际渲染差一截，
      量出来全是过渡起点 —— 而且每一层都差，叠起来就是内层戳出外层。 */
@@ -173,27 +194,27 @@
      结果就是内容区从容器里戳出去。 */
   .body.over{
     border-color:var(--cn);
-    background:#122019;
+    background:var(--选);
     box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cn) 27%, transparent);
   }
   .body::after{content:'拖块进来';position:absolute;left:8px;top:6px;
-    color:#39424f;font-size:11px;pointer-events:none}
+    color:var(--字4);font-size:11px;pointer-events:none}
   .body:has(> .blk)::after{display:none}
 
   .palette-grip{position:absolute;top:0;right:-3px;width:8px;height:100%;
     cursor:col-resize;z-index:6}
   .palette-grip::after{content:'';position:absolute;top:50%;left:3px;width:2px;height:34px;
-    margin-top:-17px;background:#39424f;border-radius:1px;transition:background .12s}
+    margin-top:-17px;background:var(--字4);border-radius:1px;transition:background .12s}
   .palette-grip:hover::after,.palette-grip.按着::after{background:var(--cn)}
   .palette-grip:hover,.palette-grip.按着{background:color-mix(in srgb, var(--cn) 13%, transparent)}
 
   .孤岛提示{position:absolute;left:40px;top:12px;padding:4px 10px;border-radius:5px;
-    background:#2a1414;color:var(--bad);font-size:11.5px;border:1px solid #442020;
+    background:var(--错底);color:var(--bad);font-size:11.5px;border:1px solid var(--错线);
     z-index:50;pointer-events:none}
   .孤岛提示.hidden{display:none}
   .fld.有选项{cursor:pointer}
 
-  .palette.回收{background:#2a1414;box-shadow:inset 0 0 0 2px #ff6b6b66}
+  .palette.回收{background:var(--错底);box-shadow:inset 0 0 0 2px #ff6b6b66}
   .palette.回收::after{content:'松手删掉';position:absolute;left:12px;bottom:12px;
     color:var(--bad);font-size:11px;pointer-events:none}
 
@@ -205,7 +226,7 @@
     border-bottom:1px solid var(--line);background:var(--panel)}
   /* 中间层单独一列。默认收成一条竖条（不占地方），点开才铺开，
      这样块、中文写法、C# 能横向对着看。 */
-  .mid{flex:none;width:34px;background:#131820;border-left:1px solid var(--line);
+  .mid{flex:none;width:34px;background:var(--panel);border-left:1px solid var(--line);
     display:flex;flex-direction:column;overflow:hidden;
     transition:width .14s ease-out}
   .mid.开{width:auto;flex:2 1 0;min-width:200px}
@@ -225,11 +246,11 @@
      只是文字是中文。两边并排 = 一行对一行，滚到哪里都在同一行上。 */
   .mid .codelines{margin:0;padding:6px 0;flex:1;overflow:auto;display:none;
     font-size:11.5px;line-height:1.55;white-space:pre;
-    background:#10151c;user-select:text}
+    background:var(--槽);user-select:text}
   .mid.开 .codelines{display:block}
   .mid .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
   .mid .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
-    color:#39424f;user-select:none;font-size:10.5px}
+    color:var(--字4);user-select:none;font-size:10.5px}
   .mid .codelines .tx{flex:1;min-width:0;white-space:pre;color:#a8b8a0;
     word-break:break-all}
   .mid .codelines .tx.空{color:transparent}
@@ -239,32 +260,32 @@
     font-family:inherit;user-select:text}
   .codelines .ln{display:flex;align-items:flex-start;padding:0 10px 0 0}
   .codelines .no{flex:none;width:34px;text-align:right;padding-right:10px;
-    color:#39424f;user-select:none;font-size:10.5px}
+    color:var(--字4);user-select:none;font-size:10.5px}
   .codelines .tx{flex:1;min-width:0;white-space:pre;color:var(--cs);word-break:break-all;
     position:relative}
   /* 大括号结构线由 画行() 直接写成 background-image（一根线一层渐变，位置用 ch）——
      这里不留样式，见画行() 里的 线图()。 */
-  .codelines .ln.bad{background:#2a1414}
-  .codelines .ln.bad .tx{color:#ff9a9a}
-  .codelines .ln.warn2{background:#241f10}
-  .codelines .ln.warn2 .tx{color:#f0c674}
-  .codelines .ln.闪{background:#1c3326}
+  .codelines .ln.bad{background:var(--错底)}
+  .codelines .ln.bad .tx{color:#c08080}
+  .codelines .ln.warn2{background:#221d14}
+  .codelines .ln.warn2 .tx{color:#c8a860}
+  .codelines .ln.闪{background:var(--选)}
 
   .errcount{float:right;font-size:10.5px;color:var(--dim)}
   .errcount.有错{color:var(--bad)}
-  .errs{flex:none;max-height:38%;overflow:auto;border-top:1px solid #442020;
-    background:#1a1010}
+  .errs{flex:none;max-height:38%;overflow:auto;border-top:1px solid var(--错线);
+    background:var(--错底)}
   .errs.hidden{display:none}
   .err{display:flex;gap:8px;padding:4px 10px;font-size:11.5px;cursor:pointer;
-    border-bottom:1px solid #2a1a1a;line-height:1.45}
-  .err:hover{background:#2a1a1a}
-  .err .码{flex:none;width:52px;color:#d08080;font-size:10.5px}
-  .err .位{flex:none;width:44px;color:#7b8494;font-size:10.5px}
-  .err .说{flex:1;min-width:0;color:#e0c0c0}
+    border-bottom:1px solid var(--错底);line-height:1.45}
+  .err:hover{background:var(--错底)}
+  .err .码{flex:none;width:52px;color:#b07070;font-size:10.5px}
+  .err .位{flex:none;width:44px;color:var(--dim);font-size:10.5px}
+  .err .说{flex:1;min-width:0;color:#c0a0a0}
   .err.警{opacity:.75}
-  .err.警 .码{color:#c8a060}
-  .warn{padding:4px 10px;background:#2a1414;color:var(--bad);font-size:11px;
-    border-top:1px solid #442020}
+  .err.警 .码{color:#b89858}
+  .warn{padding:4px 10px;background:var(--错底);color:var(--bad);font-size:11px;
+    border-top:1px solid var(--错线)}
   .warn.hidden{display:none}
 </style>
 </head>
@@ -1685,7 +1706,7 @@ function 画行(盒, 源) {
   const 画线 = (字, 线们) => {
     const 要画 = 线们.filter(o => !o.头 && !o.尾);
     if (!要画.length) return;
-    const 层 = 'linear-gradient(to right, #2d3746 0 1px, transparent 1px)';
+    const 层 = 'linear-gradient(to right, var(--line) 0 1px, transparent 1px)';
     字.style.backgroundImage = 要画.map(() => 层).join(', ');
     字.style.backgroundPosition = 要画.map(o => 线列(o.c) + ' 0').join(', ');
     字.style.backgroundSize = 要画.map(() => '1px 100%').join(', ');
@@ -1955,7 +1976,7 @@ if (有壳()) {
       const 条 = document.createElement('div');
       条.textContent = '✗ ' + d.说;
       条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
-        'background:#2a1414;color:#ff9a9a;border:1px solid #442020;border-radius:6px;' +
+        'background:var(--错底);color:#c08080;border:1px solid var(--错线);border-radius:6px;' +
         'padding:7px 12px;font-size:11.5px;max-width:360px';
       document.body.appendChild(条);
       setTimeout(() => 条.remove(), 5000);
