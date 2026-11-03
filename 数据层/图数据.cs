@@ -87,6 +87,18 @@ namespace 图数据
                 if (!列.Contains(e.自)) 列.Add(e.自);
             }
 
+            // 你拖过的位置优先。重灌数据库不动布局表（Program.cs 里就是这么说的），
+            // 那这里就得真的读它 —— 不然每次重新组装，你摆好的框全被网格重算冲掉。
+            var 存位 = new Dictionary<string, (double x, double y)>(StringComparer.Ordinal);
+            try
+            {
+                using var 命 = 连.CreateCommand();
+                命.CommandText = "SELECT id, x, y FROM 布局";
+                using var 读位 = 命.ExecuteReader();
+                while (读位.Read()) 存位[读位.GetString(0)] = (读位.GetDouble(1), 读位.GetDouble(2));
+            }
+            catch { /* 老库还没建布局表 —— 用网格默认位置就行 */ }
+
             var 实例们 = new List<object>();
             var 组节点 = 节点列表
                 .Where(n => n.类型 == "组件" && n.树 == "场景")
@@ -135,11 +147,13 @@ namespace 图数据
 
                 // 摆位：网格。列 = 序号 % 列数，行 = 序号 / 列数。
                 // 每行的 y 是前面各行高度的累加 —— 高的实例不会压到下一行的头。
+                // 但如果你亲手拖过它（布局表里有），就用你的位置，网格只是默认值。
                 var 列号 = 序号 % 列数;
                 var 行序 = 序号 / 列数;
                 double x = 90 + 列号 * 格宽;
                 double y = 130;
                 for (var r = 0; r < 行序; r++) y += 逐行高[r] + 格缝;
+                if (存位.TryGetValue(组.Key, out var 存)) { x = 存.x; y = 存.y; }
                 序号++;
 
                 var 脚本们 = new List<object>();
