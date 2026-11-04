@@ -21,33 +21,54 @@ public class 鼠 {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool on);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   public const uint 下 = 0x0002, 上 = 0x0004, 滚 = 0x0800;
+
+  public static bool 抢前台(IntPtr h) {
+    if (GetForegroundWindow() == h) return true;
+    // ① 最温和的：模拟 ALT 解前台锁
+    keybd_event(0x12, 0, 0, UIntPtr.Zero);
+    keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    SetForegroundWindow(h);
+    if (GetForegroundWindow() == h) return true;
+    // ② 真正管用的：把自己挂着前台窗口的输入队列上，再抢。
+    //    Windows 只允许「当前前台进程」把前台让给别人 —— AttachThreadInput
+    //    把两个线程的输入队列并起来，就等于借了前台的资格。
+    uint ignored;
+    uint fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out ignored);
+    uint myThread = GetCurrentThreadId();
+    if (fgThread != 0 && fgThread != myThread) {
+      AttachThreadInput(myThread, fgThread, true);
+      ShowWindow(h, 9);
+      SetForegroundWindow(h);
+      AttachThreadInput(myThread, fgThread, false);
+      if (GetForegroundWindow() == h) return true;
+    }
+    // ③ 最后退一步：最小化再还原，把它顶到最前
+    ShowWindow(h, 6);
+    ShowWindow(h, 9);
+    SetForegroundWindow(h);
+    return GetForegroundWindow() == h;
+  }
 }
 "@
 
-# ⚠️ 抢前台。直接 SetForegroundWindow 会被「前台锁定」挡住 ——
-#    实测调用之后窗口仍然不是前台，鼠标事件全落到别的窗口上，
-#    页面连一个 mousemove 都收不到。表现是「鼠标动了但页面没反应」，
-#    很容易误判成页面自己的毛病。
-#    标准解法：先模拟按一下 ALT 解开锁定，再 SetForegroundWindow。
+# ⚠️ 抢不到前台就**直接失败退出**，别接着往下倒鼠标动作。
+#    抢不到的时候光标照样会动、mouse_event 照样返回，但事件全落到别的窗口上 ——
+#    页面连一个 mousemove 都收不到，看起来像「页面坏了」，其实是根本没点中它。
+#    实测栽过：一轮滚轮测试全是 0 事件，我却去改 CSS。
 $proc = Get-Process -Name "中文套式编辑器" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($proc) {
-  $h = $proc.MainWindowHandle
-  if ([鼠]::GetForegroundWindow() -ne $h) {
-    [鼠]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)   # ALT down
-    [鼠]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)   # ALT up
-    [鼠]::SetForegroundWindow($h) | Out-Null
-    Start-Sleep -Milliseconds 400
-    if ([鼠]::GetForegroundWindow() -ne $h) {
-      # 还抢不到就退一步：最小化再还原，这会把窗口顶到最前
-      [鼠]::ShowWindow($h, 6) | Out-Null
-      Start-Sleep -Milliseconds 150
-      [鼠]::ShowWindow($h, 9) | Out-Null
-      Start-Sleep -Milliseconds 400
-    }
-    if ([鼠]::GetForegroundWindow() -ne $h) { Write-Warning "抢前台失败 —— 下面这些鼠标动作大概率落不到编辑器上" }
+  if (-not [鼠]::抢前台($proc.MainWindowHandle)) {
+    Write-Error "抢不到前台，鼠标动作会落到别的窗口上 —— 这次测试作废"
+    exit 3
   }
   Start-Sleep -Milliseconds 200
+} else {
+  Write-Error "编辑器进程没在跑"
+  exit 3
 }
 
 function 移到($x, $y) { [鼠]::SetCursorPos($x, $y) | Out-Null; Start-Sleep -Milliseconds 8 }
@@ -98,11 +119,16 @@ switch ($动作) {
     # 第 4 个参数在 Win32 里是 uint。往下滚是 -120，直接传 Int32 负值会
     # 在 PowerShell→UInt32 的隐式转换里失败，整段 roll 就不生效 —— 显式绕成 uint。
     $方向 = if ($次 -gt 0) { 120 } else { -120 }
+    # 第 5 个参数：1 = 按住 Shift 再滚（用来验「Shift 缩外层」那条通道）。
+    # 不按住修饰键的话，真鼠标永远测不了带修饰键的分支。
+    $按Shift = ($数.Length -ge 4 -and $数[3] -eq 1)
+    if ($按Shift) { [鼠]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }
     for ($i = 0; $i -lt [Math]::Abs($次); $i++) {
       [鼠]::mouse_event([鼠]::滚, 0, 0, $方向, [IntPtr]::Zero)
       Start-Sleep -Milliseconds 40
     }
-    Write-Output "滚 ($x,$y) x$次"
+    if ($按Shift) { [鼠]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero) }
+    Write-Output "滚 ($x,$y) x$次$(if($按Shift){' +Shift'})"
   }
-  default { Write-Output "不认识的动作：$动作（点/拖/滚）" }
+  default { Write-Output "不认识的动作：$动作（移/点/拖/滚）" }
 }
