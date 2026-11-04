@@ -3080,10 +3080,47 @@ function 组件口位(空) {
   return { x: 源位.x + 宽 + 4, y: 源位.y + 4 + 序 * 22 };
 }
 
+// 把所有组件口按**源框现在的 DOM 位置**重摆一遍。
+//
+// ⚠️ 为什么需要这个：组件口的位置是在 建空头框 里算一次的，而 建空头框 只在
+//    画网（重拉数据）时跑。于是拖完框、开关一次组件口之后，源框走了、
+//    标记还钉在旧坐标上 —— 使用者原话「拖完后会呆在原地」。
+//
+// 现在改成每次 画线() 都刷一遍。画线在拖动时每帧都跑，所以在框被拖走的那一帧，
+// 标记就跟着过去了，不用等松手。
+//
+// 位置一律按 DOM 的 style.left / offsetWidth 算 —— 不用 网.位置。
+// 那两个会不同步（实测 enemy：内存 x=1206、DOM left=-354）。
+function 刷组件口() {
+  if (!网.层) return;
+  const 源框 = new Map();
+  for (const el of 网.层.querySelectorAll('.实例框')) {
+    if (el.classList.contains('空头框')) continue;
+    源框.set(el.dataset.id, {
+      x: parseFloat(el.style.left) || 0,
+      y: parseFloat(el.style.top) || 0,
+      w: el.offsetWidth || 220,
+    });
+  }
+  const 第几个 = new Map();
+  for (const 空 of (网.空头们 || [])) {
+    if (空.种类 !== '组件') continue;
+    const el = 网.层.querySelector('.空头框[data-id="' + CSS.escape(空.id) + '"]');
+    if (!el) continue;
+    const 源 = 源框.get(空.自);
+    if (!源) { el.style.visibility = 'hidden'; continue; }   // 源框没了就别杵在旧位置
+    el.style.visibility = '';
+    const k = 第几个.get(空.自) || 0;
+    第几个.set(空.自, k + 1);
+    el.style.left = (源.x + 源.w + 4) + 'px';
+    el.style.top = (源.y + 4 + k * 22) + 'px';
+  }
+}
+
 function 建空头框(空) {
   let 位 = 网.位置.get(空.id);
-  // 组件口不存位置 —— 它钉在源框右肩上。
-  if (空.种类 === '组件') 位 = 组件口位(空);
+  // 组件口不存位置 —— 它钉在源框右肩上，由 刷组件口() 每帧重算
+  if (空.种类 === '组件') 位 = { x: 0, y: 0 };
   else if (!位) {
     // 第一次摆：这个口要是长在场上某个实例身上，就摆在它正下方。
     //
@@ -4357,6 +4394,10 @@ function 画线() {
     p.appendChild(t);
     层.appendChild(p);
   }
+
+  // 组件口那几个小圆标记要跟住源框 —— 拖框时每一帧都得重摆，
+  // 不然源框走了、标记还钉在旧坐标上（使用者原话「拖完后会呆在原地」）。
+  刷组件口();
 }
 
 function 名短(id) {
