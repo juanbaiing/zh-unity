@@ -414,7 +414,10 @@ const 警告 = document.getElementById('warn');
 const 视 = { x: 0, y: 0, z: 1 };
 
 function 应用视() {
-  世界.style.transform = `translate(${视.x}px,${视.y}px) scale(${总缩放()})`;
+  // ⚠️ 外层画布永远只乘 视.z。总缩放() 里含窗户那层 内视.z ——
+  //    之前批量替换把它带进来了，于是开窗后外层被额外乘一次内层缩放，
+  //    3 × 0.15 = 0.45，整个网缩成一小团，滚轮怎么转都像卡住了。
+  世界.style.transform = `translate(${视.x}px,${视.y}px) scale(${视.z})`;
   const 牌 = document.getElementById('比例牌');
   if (牌) 牌.textContent = Math.round(视.z * 100) + '%';
 }
