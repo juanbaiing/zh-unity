@@ -5964,7 +5964,6 @@ function 建实例框(实) {
       左们.className = '脚本口 左';
       const 右们 = document.createElement('span');
       右们.className = '脚本口 右';
-      const 我位 = 网.位置.get(实.id);
       for (let k = 0; k < 口数; k++) {
         const 出口 = s.出口[k];
         const 点 = document.createElement('i');
@@ -5973,15 +5972,18 @@ function 建实例框(实) {
         // 你在 b459 说的：「线只负责告知…与具体块绑定，先连到脚本边框，再连到外面」。
         点.dataset.口 = k;
         点.title = (出口.条件 || 出口.名 || '') + ' → ' + 名短(出口.到);
-        // 判「目标在左还是在右」。拿不到目标位置就先放右边（跟原来一样）。
-        const 目标位 = 出口.到 ? 网.位置.get(出口.到) : null;
-        const 去左 = !!(我位 && 目标位 && 目标位.x < 我位.x);
-        点.dataset.侧 = 去左 ? '左' : '右';
-        (去左 ? 左们 : 右们).appendChild(点);
+        // 判「目标在左还是在右」—— 这里**不算**，先一律放右边。
+        // ⚠️ 这里只有 网.位置 可用，而它跟 DOM 的 style.left 会不同步
+        //    （实测 enemy：内存 x=1206，DOM left=-354，两边判出来正好相反）。
+        //    真正的分侧交给 画线()：那时所有框都建好了，用 DOM 的真实位置判才靠得住。
+        点.dataset.侧 = '右';
+        右们.appendChild(点);
       }
-      // 左组放在名字前面、右组放在后面 —— 中间的 .名 用 flex:1 吃掉空档
-      if (左们.childElementCount) 行.insertBefore(左们, 字);
-      if (右们.childElementCount) 行.appendChild(右们);
+      // 两个容器**始终**都插进 DOM —— 口是画线时才决定去哪边的，
+      // 一开始全在右边，左容器是空的。空的也必须在，不然画线时挪不过去。
+      行.insertBefore(左们, 字);
+      行.appendChild(右们);
+      左们.style.display = 'none';   // 空的时候不占地方，有口了画线会打开
     }
     // 点脚本名 = 张开这扇窗。窗口只在够大的时候才开（见 够大()）
     框.dataset.名 = s.名 || '';
@@ -6588,7 +6590,24 @@ function 画线() {
       const a = 源点 ? 换算(源点) : null;
       const b = 换算(目标行);
       const 连 = 连哪边(源, 的);
-      // 这个口画在哪一侧（建实例框时按目标方向定的）
+      // 口该在哪一侧：目标框在源框右边就放右，反之放左。
+      //
+      // ⚠️ 用 框位（= el.style.left，跟 DOM 一致），**不要用 网.位置** ——
+      //    实测两者会不同步（enemy 内存 x=1206、DOM left=-354），
+      //    拿内存坐标判会把口放到完全相反的一侧，线就从框的另一头绕出去。
+      //    这里顺手把口挪过去，所以拖框改变相对位置时，口会自己换边。
+      const 该侧 = (的.x >= 源.x) ? '右' : '左';
+      if (源点 && 源点.dataset.侧 !== 该侧 && 源行) {
+        const 容器 = 源行.querySelector('.脚本口.' + 该侧);
+        if (容器) {
+          容器.appendChild(源点);
+          源点.dataset.侧 = 该侧;
+          容器.style.display = '';
+          // 对面那个空了就收起来，不占位置
+          const 对面 = 源行.querySelector('.脚本口.' + (该侧 === '右' ? '左' : '右'));
+          if (对面 && !对面.childElementCount) 对面.style.display = 'none';
+        }
+      }
       const 从左侧出 = 源点 ? 源点.dataset.侧 === '左' : false;
 
       // 端点就放在**口上 / 目标行上**，不推到框边界。
