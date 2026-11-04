@@ -61,12 +61,12 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   记('连线画出来了', 开.线 > 0, 开.线 + ' 条 path');
   记('生成 C# 不报错', 开.生成行 > 0, 开.生成行 + ' 行');
 
-  // 线中途不能进任何框 —— 包括它自己连的那两个。
+  // 线不能穿过**不相干的**框。
   //
-  // ⚠️ 第一版把「源和目标」排除掉了，结果一条不漏地通过，而截图里明明有两条线
-  //    从 Cube 框里钻出来：那条线的**目标就是 Cube**，穿过 Cube 内部的那一段被当成
-  //    「正常接触」跳过了。所以这版改成：只允许在两端 24px 以内接触框，
-  //    中途进任何框都算。
+  // 判据为什么要排除源和目标：线现在落在「脚本行」上，而行在框内部 ——
+  // 从框边进到那一行，必然穿一小段自己的框，那是它该走的路。
+  // 真正要抓的是 Coin→Cube 那种：线钻进 Cube 内部走了一大段才出来。
+  // ⚠️ 这条判据改过两次，每次都是被同一件事骗：判据得跟「线该落在哪」一起变。
   const 穿框 = JSON.parse(await 算(`(function(){
     const 框们=[...document.querySelectorAll('#网层 .实例框')]
       .filter(e=>!e.classList.contains('空头框') && !e.classList.contains('孤岛框'))
@@ -80,9 +80,10 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
       if(!长) continue;
       const 自=String(p.dataset.自||''), 到=String(p.dataset.到||'');
       const 撞=new Set();
-      for(let 沿=24; 沿<=长-24; 沿+=Math.max(3, 长/240)){
+      for(let 沿=0; 沿<=长; 沿+=Math.max(2, 长/300)){
         const pt=p.getPointAtLength(沿);
         for(const b of 框们){
+          if(b.id===自 || b.id===到) continue;
           if(pt.x>b.x+2&&pt.x<b.x+b.w-2&&pt.y>b.y+2&&pt.y<b.y+b.h-2) 撞.add(b.id);
         }
       }

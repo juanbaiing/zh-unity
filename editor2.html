@@ -315,6 +315,15 @@
   .空头框.误报 .实例名{color:var(--字3)!important;font-weight:400}
   .空头框.误报 .实例签{color:var(--字4)!important;background:transparent}
   .空头框.误报 .实例脚{color:var(--字4)!important}
+  /* 连到 Unity 内置组件：不是错，是中性的。用蓝灰，不跟红色抢注意力。 */
+  .空头框.组件头{
+    border:1px dashed #5a6f8a!important;
+    border-left:3px solid #5a6f8a!important;
+    background:color-mix(in srgb, #5a6f8a 12%, var(--panel))!important;
+  }
+  .空头框.组件头 .实例名{color:#9db3cc!important;font-weight:500}
+  .空头框.组件头 .实例签{color:#8aa2bd!important;background:transparent}
+  .空头框.组件头 .实例脚{color:#7d8fa3!important}
   /* 悬停一个框：只留跟它有关的那几根线，其余压到接近底色。
      线一多，任何走线算法都救不了 —— 一次只看一束才行。
      这个比你之前提的「整体保留但半透明」更激进一点：只点亮一束，其余几乎消失。 */
@@ -2368,6 +2377,35 @@ function 画网(图, 原地) {
   网.申诉们 = Array.isArray(图.申诉们) ? 图.申诉们 : [];
   for (const 实 of 网.实例们) 建实例框(实);
   for (const 孤 of 网.孤岛们) 建孤岛框(孤);
+
+  // 连到 Unity 内置组件的出口：目标不是用户脚本，装不进任何一行里。
+  // 按你说的「还是空头」—— 给它一个空头框，写上连到哪个组件。
+  // 注意这不是错误：Rigidbody / Renderer 本来就该是组件，所以样式是中性的，不标红。
+  {
+    const 行存在 = new Set();
+    for (const 框el of 网.层.querySelectorAll('.实例框'))
+      for (const 行框 of 框el.querySelectorAll('.脚本框'))
+        行存在.add(框el.dataset.id + '\u0001' + String(行框.dataset.名 || '').replace(/\[\d+\]$/, ''));
+    for (const 实 of 网.实例们) {
+      const 源位 = 网.位置.get(实.id);
+      for (const s of 实.脚本 || []) {
+        for (let k = 0; k < (s.出口 || []).length; k++) {
+          const 出口 = s.出口[k];
+          const 型 = 出口.到类型 || '?';
+          if (出口.到 && 行存在.has(出口.到 + '\u0001' + 型)) continue;   // 有对应用户脚本行，画线就行
+          const id = '组件|' + 实.id + '|' + s.名 + '|' + 型 + '|' + k;
+          if (网.空头们.some(x => x.id === id)) continue;
+          网.空头们.push({
+            id, 自: 实.id, 组件: s.名 + '#' + k, 字段: 型, 口: k, 脚本名: s.名,
+            种类: '组件', 名: 型, 申诉: null,
+            x: 源位 ? 源位.x : 0,
+            y: 源位 ? 源位.y + 340 + 网.空头们.length * 100 : 0,
+          });
+        }
+      }
+    }
+  }
+
   for (const 空 of 网.空头们) 建空头框(空);
   画脚本索引();
   画申诉区();
@@ -2494,7 +2532,10 @@ function 建空头框(空) {
     网.位置.set(空.id, 位);
   }
   const el = document.createElement('div');
-  el.className = '实例框 空头框' + (空.申诉 === '正常' ? ' 误报' : '');
+  // 组件头不是错误：Rigidbody / Renderer 本来就该是组件，所以用中性样式。
+  el.className = '实例框 空头框'
+    + (空.种类 === '组件' ? ' 组件头' : '')
+    + (空.申诉 === '正常' ? ' 误报' : '');
   el.dataset.id = 空.id;
   el.style.left = 位.x + 'px';
   el.style.top = 位.y + 'px';
@@ -2508,7 +2549,7 @@ function 建空头框(空) {
   名.textContent = 空.名 || 空.字段 || 空.id;
   const 签 = document.createElement('span');
   签.className = '实例签';
-  签.textContent = 空.申诉 === '正常' ? '已申诉' : '缺接应';
+  签.textContent = 空.申诉 === '正常' ? '已申诉' : (空.种类 === '组件' ? 'Unity 组件' : '缺接应');
   头.appendChild(名); 头.appendChild(签);
   el.appendChild(头);
 
@@ -2519,7 +2560,9 @@ function 建空头框(空) {
   说.style.borderTop = '0';
   说.textContent = 空.申诉 === '正常'
     ? '你申诉过 · 这里没问题'
-    : '没人来接 · 右键处理';
+    : 空.种类 === '组件'
+      ? '连到 Unity 内置组件，不是断'
+      : '没人来接 · 右键处理';
   体.appendChild(说);
   el.appendChild(体);
 
@@ -2790,6 +2833,9 @@ function 建实例框(实) {
       点们.className = '脚本口';
       for (let k = 0; k < 口数; k++) {
         const 点 = document.createElement('i');
+        // 这个点就是「连线节点」的落点 —— 线从这儿出去，不从这个实例框整条边出去。
+        // 你在 b459 说的：「线只负责告知…与具体块绑定，先连到脚本边框，再连到外面」。
+        点.dataset.口 = k;
         点.title = (s.出口[k].条件 || s.出口[k].名 || '') + ' → ' + 名短(s.出口[k].到);
         点们.appendChild(点);
       }
@@ -3058,53 +3104,86 @@ function 画线() {
     层.appendChild(h);
   };
 
+  // 落点：每个「实例 + 脚本名」对应哪一行 DOM。
+  // 线要落在这一行上，不落在实例框整条边上 —— b459：「先连到脚本边框，再连到外面」。
+  const 行表 = new Map();
+  for (const 框el of 网.层.querySelectorAll('.实例框')) {
+    const 实id = 框el.dataset.id;
+    for (const 行框 of 框el.querySelectorAll('.脚本框'))
+      行表.set(实id + '\u0001' + String(行框.dataset.名 || '').replace(/\[\d+\]$/, ''), 行框);
+  }
+  // DOM 屏幕坐标 → #world 坐标（#world 有 translate+scale，origin 0 0）
+  const 世界r = 世界.getBoundingClientRect();
+  const 换算 = el => {
+    const r = el.getBoundingClientRect();
+    const z = 视.z || 1;
+    return { 左: (r.left - 世界r.left) / z, 右: (r.left + r.width - 世界r.left) / z,
+             上: (r.top - 世界r.top) / z, 下: (r.top + r.height - 世界r.top) / z,
+             中y: (r.top + r.height / 2 - 世界r.top) / z,
+             中x: (r.left + r.width / 2 - 世界r.left) / z };
+  };
+
   for (const 实 of 网.实例们) {
     const 源 = 框位.get(实.id);
     if (!源) continue;
-    // 先把出口归拢，才知道该把起点分几份
+    // 每个出口记住它属于哪个脚本的第几个口 —— 那是线的落点
     const 出 = [];
     for (const s of 实.脚本 || [])
-      for (const 出口 of s.出口 || []) {
+      for (let k = 0; k < (s.出口 || []).length; k++) {
+        const 出口 = s.出口[k];
         if (!出口.到 || 出口.到 === 实.id) continue;
         if (!框位.has(出口.到)) continue;
-        出.push(出口);
+        出.push({ s, k, 出口 });
       }
     if (!出.length) continue;
 
-    // 起点按框高平分，不是固定 6 个槽。
-    // 原来是 (用 % 6) * 12 —— 十条线挤进 72px，一出框就分不清哪根是哪根。
-    const 可用 = Math.max(16, 源.h - 实例头高 - 30);
-    const 间距 = 出.length > 1 ? Math.min(15, 可用 / (出.length - 1)) : 0;
-    const 起 = 源.y + 实例头高 + 16 + Math.max(0, (可用 - 间距 * (出.length - 1)) / 2);
-
     for (let i = 0; i < 出.length; i++) {
-      const 出口 = 出[i];
+      const { s, k, 出口 } = 出[i];
       const 的 = 框位.get(出口.到);
-      // 选从源框哪一边出去、进目标框哪一边。上下相邻的走上下边，其余走左右边。
+
+      // 源点：这个脚本那一行右边第 k 个圆点。
+      // 找得到就用它 —— 这样箭头扎在哪一行，就是哪个脚本在伸手。
+      const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || '').replace(/\[\d+\]$/, ''));
+      const 源点们 = 源行 ? 源行.querySelectorAll('.脚本口 i') : null;
+      const 源点 = 源点们 && 源点们[k] ? 源点们[k] : (源行 || null);
+
+      // 终点：目标框里挂着「到类型」那一行的左边。找不到这一行就不连线 ——
+      // 那种出口连的是 Unity 内置组件（Rigidbody / Renderer…），不是用户脚本，
+      // 交给下面的「组件空头」处理。
+      const 目标行 = 行表.get(出口.到 + '\u0001' + String(出口.到类型 || ''));
+      if (!目标行) continue;
+
+      const a = 源点 ? 换算(源点) : null;
+      const b = 换算(目标行);
       const 连 = 连哪边(源, 的);
+      // 方向要用**端点**算，不能用框算。
+      // 用框算得出「往右」，但起点取的是那一行的左边、终点在右边时，
+      // 曲线的控制点会朝右伸 —— 正好伸进自己框里，线从框内部穿出去（实测 Cube→enemy）。
+      const 往右 = a ? (b.中x >= a.中x) : 连.往右;
       let x1, y1, x2, y2, 朝;
+
       if (连.竖) {
-        // 从上/下边出。多条出口时横向散开 —— 不然全从同一个点长出来。
-        x1 = Math.round(源.x + 源.w * ((i + 1) / (出.length + 1)));
-        y1 = 连.往下 ? 源.y + 源.h : 源.y;
-        x2 = Math.round(的.x + 的.w * 0.5);
-        y2 = 连.往下 ? 的.y : 的.y + 的.h;
+        x1 = a ? a.中x : Math.round(源.x + 源.w * ((i + 1) / (出.length + 1)));
+        y1 = a ? (连.往下 ? a.下 : a.上) : (连.往下 ? 源.y + 源.h : 源.y);
+        x2 = b.中x;
+        y2 = 连.往下 ? b.上 : b.下;
         朝 = 连.往下 ? '下' : '上';
       } else {
-        x1 = 连.x1;
-        y1 = Math.round(起 + i * 间距);
-        x2 = 连.x2;
-        y2 = Math.round(的.y + 的.h / 2);
-        朝 = 连.往右 ? '右' : '左';
+        x1 = a ? (往右 ? a.右 : a.左) : 连.x1;
+        y1 = a ? a.中y : Math.round(源.y + 源.h / 2);
+        x2 = 往右 ? b.左 : b.右;
+        y2 = b.中y;
+        朝 = 往右 ? '右' : '左';
       }
       const d = 选走线(x1, y1, x2, y2, 框位, 实.id, 出口.到, 连.竖);
       const p = 画一条(d, '#7a6a3f', 1.2, 实.id, 出口.到);
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      t.textContent = (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
+      t.textContent = (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
       p.appendChild(t);
       画箭头(x2, y2, '#7a6a3f', 实.id, 出口.到, 朝);
     }
   }
+
 
   // 人指定的线：你在空头框上右键说「它其实连到谁」。
   // 用虚线画 —— 扫描出来的那些是事实，这条是你说的，得一眼分得开。
@@ -3133,26 +3212,41 @@ function 画线() {
     画箭头(x2, y2, '#6fb98d', 线.自, 线.到, 朝);
   }
 
-  // 空头：从源实例伸出去，到那个空框为止。
+  // 空头：从「伸出去的那个口」连到空头框。
   // 不画箭头 —— 它本来就是「接不上的那一截」，画个箭头就成接上了。
+  //
+  // ⚠️ 起点不能再用实例框的底边。组件头是某个具体脚本的第 k 个出口长出来的，
+  //    从框底出去的话，一根红虚线会横穿下面所有的框（实测直接扎穿 coin），
+  //    而且看不出是哪个脚本伸的手。起点跟着那一行的第 k 个圆点走。
   for (const 空 of 网.空头们 || []) {
     if (空.申诉 === '正常') continue;   // 你说是误报的，就别再画这根刺
     const 源 = 框位.get(空.自);
     const 的 = 框位.get(空.id);
     if (!源 || !的) continue;
-    // 空头在源框下方，所以线从源框底边中间往下走 —— 从右边绕会跟别的线打架
-    const x1 = 源.x + 源.w / 2, y1 = 源.y + 源.h;
+
+    let x1 = 源.x + 源.w / 2, y1 = 源.y + 源.h;
+    const 源行 = 空.脚本名 ? 行表.get(空.自 + '\u0001' + String(空.脚本名).replace(/\[\d+\]$/, '')) : null;
+    if (源行) {
+      const 点们 = 源行.querySelectorAll('.脚本口 i');
+      const 点 = 点们 && 点们[空.口 || 0] ? 点们[空.口 || 0] : null;
+      if (点) { const a = 换算(点); x1 = a.右; y1 = a.中y; }
+      else { const a = 换算(源行); x1 = a.右; y1 = a.中y; }
+    }
+
     const x2 = 的.x + 的.w / 2, y2 = 的.y;
     const my = (y1 + y2) / 2;
+    const 色 = 空.种类 === '组件' ? '#5a6f8a' : '#d96464';
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('d', `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`);
     p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', '#d96464');
-    p.setAttribute('stroke-width', '2.2');
-    p.setAttribute('stroke-dasharray', '6 4');
-    p.setAttribute('opacity', '0.95');
+    p.setAttribute('stroke', 色);
+    p.setAttribute('stroke-width', 空.种类 === '组件' ? '1.4' : '2.2');
+    p.setAttribute('stroke-dasharray', 空.种类 === '组件' ? '3 4' : '6 4');
+    p.setAttribute('opacity', '0.9');
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    t.textContent = (空.字段 || '') + ' —— 这里没有接应';
+    t.textContent = 空.种类 === '组件'
+      ? (空.脚本名 || '') + ' 的这个口连到 Unity 组件 ' + (空.字段 || '')
+      : (空.字段 || '') + ' —— 这里没有接应';
     p.appendChild(t);
     层.appendChild(p);
   }
