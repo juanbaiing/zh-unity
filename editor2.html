@@ -297,10 +297,14 @@
      它在关系网里面被裁着 —— 网还在，只是这一格里自己一套缩放平移。 */
   /* 窗户：.实例体 里的内容。不是盖在框上的浮层 ——
      框的边框、圆角、头、脚全都不动，换的只是肚子里装的东西。 */
-  .窗户{position:absolute;left:0;top:0;right:0;bottom:0;
-    background:var(--槽);overflow:hidden;border-radius:4px}
+    .窗户{position:absolute;left:0;top:0;right:0;bottom:0;
+    background:var(--槽);overflow:hidden;border-radius:4px;cursor:grab}
+  .窗户.平移中{cursor:grabbing}
+  .窗户 .blk{cursor:default}
   .实例体{position:relative}
-  .实例体.编辑中{padding:0;height:auto;min-height:420px}
+  /* 不再用 min-height 撑 —— 那会让内容区比框还高，画布戳出框外。
+     尺寸统一由 .实例框 在开窗时按屏幕比例定。 */
+  .实例体.编辑中{padding:0;height:100%}
   .内世界{position:absolute;left:0;top:34px;transform-origin:0 0;
     transform:translate(var(--内x,0px),var(--内y,0px)) scale(var(--内z,1))}
 
@@ -2288,6 +2292,8 @@ function 画网(图) {
 function 窗口改了就重排() {
   const 比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
   for (const el of document.querySelectorAll('.实例框')) {
+    // 正在编辑的那个框由开窗时定死尺寸，别拿"高 × 比例"去改它
+    if (el.querySelector(':scope > .实例体.编辑中')) continue;
     // ⚠️ 必须先把宽度放开再量高度。
     //    不放开的话，宽度还是上一轮算的值，文字换行方式跟着宽度走，
     //    量出来的高度就是旧形状下的高度 —— 一路叠下去框会越来越歪
@@ -2510,6 +2516,9 @@ function 关窗() {
     for (const n of (窗.原内容 || [])) 体.appendChild(n);
   }
   for (const el of (窗.头标 || [])) el.remove();
+  // 开窗时定死的宽高要清掉，不然收起来还是那块大方框
+  const 实el = 窗.实例 ? document.querySelector('.实例框[data-id="' + CSS.escape(窗.实例) + '"]') : null;
+  if (实el) { 实el.style.width = ''; 实el.style.height = ''; }
   if (窗.头钮) 窗.头钮.style.display = '';
   requestAnimationFrame(窗口改了就重排);
   当前画布 = null;
@@ -2530,6 +2539,16 @@ function 开窗(实例el, 脚本名) {
 
   const 体 = 实例el.querySelector(':scope > .实例体');
   if (!体) { 网提示('这个实例框没有内容区'); return; }
+
+  // 框在 #world 里，尺寸是 CSS 单位，屏幕上还要乘 视.z。
+  // 所以要「屏幕上占舞台 92%」，CSS 就得是 舞台宽/视.z。
+  // 高度按屏幕比例走 —— 这样开出来的画布是屏幕的形状，不是方的。
+  const 台r = 舞台.getBoundingClientRect();
+  const 外z = 视.z || 1;
+  const 屏比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
+  const 框CSS宽 = Math.round(台r.width * 0.92 / 外z);
+  实例el.style.width = 框CSS宽 + 'px';
+  实例el.style.height = Math.round(框CSS宽 / 屏比) + 'px';
 
   关窗();
   窗.脚本 = 脚本名; 窗.实例 = 实例el.dataset.id;
@@ -2623,6 +2642,31 @@ function 装窗缩放() {
     窗.内视.z = 新z;
     应用内视();
   }, { passive: false });
+
+  // 拖空白 = 平移窗户里的世界。
+  // 块自己会 stopPropagation（开始拖里就这么写的），输入框也不会冒到这一层，
+  // 所以能走到这儿的，基本就是空白处。
+  框.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.blk') || e.target.closest('input') || e.target.closest('textarea')) return;
+    e.preventDefault();
+    const 起 = { x: e.clientX, y: e.clientY, ox: 窗.内视.x, oy: 窗.内视.y };
+    框.classList.add('平移中');
+    const 移 = ev => {
+      // 内视.x/y 是屏幕像素级的平移量（transform 里 translate 在 scale 外面），
+      // 所以直接加屏幕位移，不用除缩放。
+      窗.内视.x = 起.ox + (ev.clientX - 起.x);
+      窗.内视.y = 起.oy + (ev.clientY - 起.y);
+      应用内视();
+    };
+    const 停 = () => {
+      框.classList.remove('平移中');
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
 }
 
 // 一条界面上看得见的提示，不弹窗（弹窗会卡死整个页面，见下面那个「出错」的注释）
