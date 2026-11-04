@@ -6524,11 +6524,25 @@ function 画线() {
 
   // 落点：每个「实例 + 脚本名」对应哪一行 DOM。
   // 线要落在这一行上，不落在实例框整条边上 —— b459：「先连到脚本边框，再连到外面」。
+  //
+  // ⚠️ 这里错过一次，就是「线连到别的块上」的真正原因：
+  //    原来只写一个键，且把 `EnemyHp[2]` 归一成 `EnemyHp` 再 set ——
+  //    于是后写的 `EnemyHp[2]` **覆盖**了真正的 `EnemyHp`。
+  //    Cube 的三条出口都写着「到 EnemyHp」，查出来全指向 `EnemyHp[2]` 那一行，
+  //    三条线叠在同一行上，看起来就是「连错了块」。
+  //
+  //    现在两个键都存：精确名（`EnemyHp[2]`）单独一个，去后缀的简名如果**还没人占**才用。
+  //    DOM 顺序里 `EnemyHp` 在 `EnemyHp[2]` 前面，所以简名留在真正的第一个上。
   const 行表 = new Map();
   for (const 框el of 网.层.querySelectorAll('.实例框')) {
     const 实id = 框el.dataset.id;
-    for (const 行框 of 框el.querySelectorAll('.脚本框'))
-      行表.set(实id + '\u0001' + String(行框.dataset.名 || '').replace(/\[\d+\]$/, ''), 行框);
+    for (const 行框 of 框el.querySelectorAll('.脚本框')) {
+      const 全名 = String(行框.dataset.名 || '');
+      行表.set(实id + '\u0001' + 全名, 行框);
+      const 简名 = 全名.replace(/\[\d+\]$/, '');
+      const 简键 = 实id + '\u0001' + 简名;
+      if (!行表.has(简键)) 行表.set(简键, 行框);
+    }
   }
   // DOM 屏幕坐标 → #world 坐标（#world 有 translate+scale，origin 0 0）
   const 世界r = 世界.getBoundingClientRect();
@@ -6564,7 +6578,7 @@ function 画线() {
       }
     for (const { s, k, 出口 } of 出) {
       const 的 = 框位.get(出口.到);
-      const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || '').replace(/\[\d+\]$/, ''));
+      const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || ''));
       // ⚠️ 按 data-口 找，不能按顺序取 —— 口现在分左右两组，
       //    节点里先出现左组再出现右组，querySelectorAll 的顺序跟 k 对不上。
       const 源点 = 源行 ? 源行.querySelector('.脚本口 i[data-口="' + k + '"]') : null;
@@ -6730,11 +6744,11 @@ function 画线() {
     if (!源 || !的) continue;
 
     let x1 = 源.x + 源.w / 2, y1 = 源.y + 源.h;
-    const 源行 = 空.脚本名 ? 行表.get(空.自 + '\u0001' + String(空.脚本名).replace(/\[\d+\]$/, '')) : null;
+    const 源行 = 空.脚本名 ? 行表.get(空.自 + '\u0001' + String(空.脚本名)) : null;
     if (源行) {
-      const 点们 = 源行.querySelectorAll('.脚本口 i');
-      const 点 = 点们 && 点们[空.口 || 0] ? 点们[空.口 || 0] : null;
-      if (点) { const a = 换算(点); x1 = a.右; y1 = a.中y; }
+      // 组件口按 data-口 找 —— 口分了左右两组，按顺序取会拿错
+      const 点 = 源行.querySelector('.脚本口 i[data-口="' + (空.口 || 0) + '"]');
+      if (点) { const a = 换算(点); x1 = a.中x; y1 = a.中y; }
       else { const a = 换算(源行); x1 = a.右; y1 = a.中y; }
     }
 
