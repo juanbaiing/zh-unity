@@ -54,6 +54,33 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   记('连线画出来了', 开.线 > 0, 开.线 + ' 条 path');
   记('生成 C# 不报错', 开.生成行 > 0, 开.生成行 + ' 行');
 
+  // 线不能穿过不相干的框。穿过去就是 edge ambiguity —— 线从框边上露出来，
+  // 看着像连到了那个框上（Ambiguity-Free Edge-Bundling 那篇的主题）。
+  // 采样曲线上的点，落进任何一个「既不是源也不是目标」的框内部就算穿。
+  const 穿框 = JSON.parse(await 算(`(function(){
+    const 框们=[...document.querySelectorAll('#网层 .实例框')]
+      .filter(e=>!e.classList.contains('空头框') && !e.classList.contains('孤岛框'))
+      .map(e=>({id:e.dataset.id, x:parseFloat(e.style.left)||0, y:parseFloat(e.style.top)||0,
+                w:e.offsetWidth, h:e.offsetHeight}));
+    let 条=0, 例='';
+    for(const p of document.querySelectorAll('#线层 path[data-自]')){
+      const d=p.getAttribute('d')||'';
+      if(d.indexOf('l -8')>=0 || d.indexOf('l 8')>=0) continue;   // 箭头
+      const 长=p.getTotalLength(), 自=p.dataset.自, 到=p.dataset.到;
+      let 穿=false;
+      for(let t=0;t<=1&&!穿;t+=0.02){
+        const pt=p.getPointAtLength(长*t);
+        for(const b of 框们){
+          if(b.id===自||b.id===到) continue;
+          if(pt.x>b.x+2&&pt.x<b.x+b.w-2&&pt.y>b.y+2&&pt.y<b.y+b.h-2){穿=true;break;}
+        }
+      }
+      if(穿){条++; if(!例) 例=String(自).split('.').pop()+'→'+String(到).split('.').pop();}
+    }
+    return JSON.stringify({条, 例});
+  })()`));
+  记('连线不穿过不相干的框', 穿框.条 === 0, 穿框.条 ? `${穿框.条} 条穿框，例如 ${穿框.例}` : '全部干净');
+
   console.log('\n════ 2. 外层缩放（真鼠标滚轮）════');
   await 算(`(function(){ 视.z=1; 应用视(); window.__外=0; 舞台.addEventListener('wheel',()=>{window.__外++},{passive:true}); return 'ok'; })()`);
   const z0 = await 算('视.z');
