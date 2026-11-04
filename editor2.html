@@ -241,7 +241,10 @@
     padding:8px 12px;cursor:move;user-select:none;white-space:nowrap;
     border-bottom:1px solid var(--line)}
   .实例名{color:var(--字1);font-size:var(--字块名)}
-  .实例签{color:var(--字4);font-size:var(--字标)}
+  .实例签{color:var(--字4);font-size:var(--字标);margin-left:auto}
+  .编钮{color:#6f8aa3;font-size:var(--字标);cursor:pointer;padding:2px 8px;
+    border:1px solid var(--line);border-radius:4px;white-space:nowrap}
+  .编钮:hover{color:var(--字1);border-color:#6f8aa3}
   .实例体{padding:8px;display:flex;flex-direction:column;gap:4px}
   .脚本框{background:var(--脚);border-radius:4px}
   .脚本名{display:flex;align-items:center;justify-content:space-between;gap:8px;
@@ -2190,8 +2193,22 @@ function 建实例框(实) {
   const 签 = document.createElement('span');
   签.className = '实例签';
   签.textContent = (实.tag || 'Untagged') + ' · L' + (实.层 ?? 0);
+  // 「框占满屏幕后，内部改为编辑器画布」—— 这个按钮就是那句话里的「按一个按钮」。
+  // 不用自动：自动切换会在你只想看数据的时候被强行夺走视线。
+  const 编钮 = document.createElement('span');
+  编钮.className = '编钮';
+  编钮.textContent = '✎ 编辑';
+  编钮.title = '把这个框的内部变成编辑器画布（要先放大到占满屏幕）';
+  编钮.addEventListener('click', e => {
+    e.stopPropagation();
+    const 首个 = (实.脚本 || [])[0];
+    if (!首个) { 网提示('这个实例上没挂脚本'); return; }
+    if (窗.el && 窗.实例 === 实.id) { 关窗(); return; }
+    开窗(el, 首个.名);
+  });
   头.appendChild(名);
   头.appendChild(签);
+  头.appendChild(编钮);
   el.appendChild(头);
 
   const 体 = document.createElement('div');
@@ -2339,8 +2356,14 @@ function 拉关系图() {
 // ══════════════════════════════════════════════════════════════
 const 窗 = { 脚本: null, 实例: null, el: null, 内: null, 内视: { x: 0, y: 0, z: 1 } };
 
-function 屏幕字号() { return 14 * (视.z || 1); }
-function 够大() { return 屏幕字号() >= 24; }
+// 判据：这个实例框在屏幕上占多宽。占满（≥80% 舞台宽）才让内部变成画布 ——
+// 这是「当这个框占满屏幕后」那句话的直接翻译，不是拍脑袋的倍率。
+function 框够大(实例el) {
+  if (!实例el) return false;
+  const r = 实例el.getBoundingClientRect();
+  const 台 = 舞台.getBoundingClientRect();
+  return r.width >= 台.width * 0.8;
+}
 
 function 应用内视() {
   if (!窗.内) return;
@@ -2361,8 +2384,8 @@ function 开窗(实例el, 脚本名) {
   const 框el = 实例el.querySelector(`.脚本框[data-名="${CSS.escape(脚本名)}"]`);
   if (窗.脚本 === 脚本名) { 关窗(); return; }
 
-  if (!够大()) {
-    网提示(`放大到最大等级再开 —— 现在字号 ${屏幕字号().toFixed(0)}px，要 24px`);
+  if (!框够大(实例el)) {
+    网提示('把这个框放大到占满屏幕，再点它内部的编辑');
     return;
   }
   if (!工程表[脚本名]) {
@@ -2376,21 +2399,19 @@ function 开窗(实例el, 脚本名) {
 
   const w = document.createElement('div');
   w.className = '窗户';
-  // 窗户是**这个脚本框的窗口**：从脚本框的位置出发，往右下铺到舞台边缘。
-  // 但必须钳在舞台里面 —— 脚本框放大后会跑到视口外，照抄它的坐标
-  // 窗户就跟着不见了（这就是上一版「放大后窗口不显示」的来历）。
-  // 也不能反过来铺满舞台：那样把网全盖住了，网就「不在那」了。
+  // 窗户 = 这个实例框在屏幕上的矩形，一字不差。
+  // 视觉上就是「框里面换成了编辑器」，框多大画布多大；框占满屏幕，画布就占满屏幕。
+  // 但仍钳在舞台里 —— 框放大后可能有一部分越出视口，画布不能被带到看不见的地方。
   const 台 = 舞台.getBoundingClientRect();
-  const 框r = (框el || 实例el).getBoundingClientRect();
-  const 最小宽 = 420, 最小高 = 320, 边 = 10;
-  let 左 = Math.min(Math.max(框r.left, 台.left + 边), 台.right - 最小宽 - 边);
-  let 上 = Math.min(Math.max(框r.top, 台.top + 边), 台.bottom - 最小高 - 边);
-  左 = Math.max(台.left + 边, 左);
-  上 = Math.max(台.top + 边, 上);
+  const 框r = 实例el.getBoundingClientRect();
+  const 左 = Math.max(台.left, Math.min(框r.left, 台.right - 240));
+  const 上 = Math.max(台.top, Math.min(框r.top, 台.bottom - 160));
+  const 右 = Math.min(台.right, Math.max(框r.right, 左 + 240));
+  const 下 = Math.min(台.bottom, Math.max(框r.bottom, 上 + 160));
   w.style.left = Math.round(左) + 'px';
   w.style.top = Math.round(上) + 'px';
-  w.style.width = Math.round(台.right - 左 - 边) + 'px';
-  w.style.height = Math.round(台.bottom - 上 - 边) + 'px';
+  w.style.width = Math.round(右 - 左) + 'px';
+  w.style.height = Math.round(下 - 上) + 'px';
   const 内 = document.createElement('div');
   内.className = '内世界';
   w.appendChild(内);
