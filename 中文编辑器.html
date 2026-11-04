@@ -280,6 +280,11 @@
   .注释框{position:absolute;border:1px solid #3d5064;border-radius:10px;
     background:color-mix(in srgb, #4a6a8a 7%, transparent);
     pointer-events:auto;box-sizing:border-box}
+  /* 框里的框是真的 DOM 子节点（父 字段见 建注释框）。子框压在父框的框体上，
+     所以要给父框自己的框头和四角更高的一档，不然里面那个框一盖，
+     父框就再也拖不动、也改不了大小了。 */
+  .注释框 > .框头{z-index:2}
+  .注释框 > .框角{z-index:2}
   /* ⚠️ 框头要整条能抓 —— 它只有 26px 高，缩到「只有标题文字能点」就只剩几十像素，
      实测在 0.42 倍缩放下标题条只有 40×6 个屏幕像素，根本点不中，整个框就拖不动了。
      框头盖不住下面的实例框：框层 z-index 1、网层 z-index 3，实例框本来就在上面。 */
@@ -4070,8 +4075,19 @@ function 建网层() {
 // 按住左键在空白处拖出一块地方，「这堆是我这段时间在弄的」。
 // 是**整理**，不是分类 —— 所以它不代表任何结构关系，只是一块地方。
 //
-// 所以不建父子表：小框的中心落在大框里，它就属于大框。天然嵌套，不用维护。
-// 也因此拖动不用递归 —— 大框把里面所有东西一起挪一遍就够了，不会挪两次。
+// ⚠️ 2026-11-04 改成「真父子」，跟代码块一个模型。
+//
+// 原来是**平的**：所有框都是 #注释框层 的直接子节点，谁是谁里面的靠
+// 「小框的中心落在大框里」现算。省了父子表，但丢掉了 DOM 白送的两样东西：
+//   ① 子元素画在父元素上面（浏览器保证）。现算的话「谁在上面」没有答案，
+//      只看 append 的先后 —— 先建小框、后建大框，大框就盖住小框，拖不动；
+//   ② 事件冒泡天然分层。现算的话父框一开 pointer-events，整块矩形全归它，
+//      里面的框每一处都命中父框。
+// 表现就是「框里套的框点不中、拖不动」。Unreal 十年没修好的 UE-9417（嵌套
+// comment box 选不中/不能改大小）是同一个病，论坛里大家的绕法是「把大框先挪开」。
+//
+// 现在：子框是父框的**真的 DOM 子节点**，x/y 相对父框（跟「块在容器里」同一套规矩）。
+// 附带的好处是拖父框时子框由浏览器带着走，不用再手写「把成员一起挪一遍」。
 //
 // ⚠️ 跟 Unreal 那套的关键差别：**框不跟着内容自动伸缩**。
 //    Unreal 里框不自己长大，一堆人天天手动拖边框；AutoSizeComments 让它自动调，
@@ -4087,17 +4103,68 @@ function 在框里(框, 位) {
   return 心x > 框.x && 心x < 框.x + 框.宽 && 心y > 框.y && 心y < 框.y + 框.高;
 }
 
-// 这个框里现在装着谁（中心点判定）。运行时算，不存成员表 —— 存了会过期。
+// ── 父子 ──────────────────────────────────────────────
+// 子框的 x/y 相对父框，所以要拿它在画布上的真实位置，得沿父链累加。
+function 绝对位(框) {
+  let x = 框.x || 0, y = 框.y || 0, 父 = 框.父 || '';
+  const 见过 = new Set([框.id]);
+  while (父) {
+    if (见过.has(父)) break;              // 数据坏了成环，别把页面挂死
+    见过.add(父);
+    const 祖 = (网.注释框们 || []).find(f => f.id === 父);
+    if (!祖) break;                        // 父没了（被删/老数据），当顶层
+    x += 祖.x || 0; y += 祖.y || 0;
+    父 = 祖.父 || '';
+  }
+  return { x, y };
+}
+
+function 找框(id) { return (网.注释框们 || []).find(f => f.id === id) || null; }
+
+// 直接子框
+function 子框们(框) {
+  return (网.注释框们 || []).filter(f => f.id !== 框.id && (f.父 || '') === 框.id);
+}
+
+// 全部后代（不含自己）
+function 后代框们(框) {
+  const 出 = [], 走 = f => { for (const c of 子框们(f)) { 出.push(c); 走(c); } };
+  走(框);
+  return 出;
+}
+
+// 某个点落在哪个框里 —— 从最深的那层往上找。
+// 用来决定「拖出来的框该归谁」「松手时拖进了哪个框」。
+function 点下最深框(x, y, 排除) {
+  const 排除集 = new Set(排除 || []);
+  let 最深 = null, 最深面积 = Infinity;
+  for (const f of (网.注释框们 || [])) {
+    if (排除集.has(f.id)) continue;
+    const 位 = 绝对位(f);
+    if (x <= 位.x || x >= 位.x + f.宽 || y <= 位.y || y >= 位.y + f.高) continue;
+    const 面积 = f.宽 * f.高;
+    if (面积 < 最深面积) { 最深 = f; 最深面积 = 面积; }
+  }
+  return 最深;
+}
+
+// 这个框里现在装着谁。
+// 注释框走真父子（子框的 DOM 就在父框里，不用算）；实例框不在框的 DOM 里
+// （它们归 #网层管，层序和连线都依赖那个），仍然按「中心落在框里」算 ——
+// 但要用**绝对坐标**，因为子框的 x/y 是相对父框的。
 function 框里成员(框) {
   const 出 = [];
-  if (!网.层) return 出;
-  for (const el of 网.层.querySelectorAll('.实例框')) {
-    if (el.dataset.id === 框.id) continue;
-    if (在框里(框, 元素的位(el))) 出.push(el);
+  for (const c of 子框们(框)) {
+    const el = 网.框层 && 网.框层.querySelector('.注释框[data-id="' + CSS.escape(c.id) + '"]');
+    if (el) 出.push(el);
   }
-  if (网.框层) for (const el of 网.框层.querySelectorAll('.注释框')) {
-    if (el.dataset.id === 框.id) continue;
-    if (在框里(框, 元素的位(el))) 出.push(el);
+  if (!网.层) return 出;
+  const 位 = 绝对位(框);
+  const 框位 = { x: 位.x, y: 位.y, 宽: 框.宽, 高: 框.高 };
+  const 全体 = new Set(后代框们(框).map(f => f.id));
+  for (const el of 网.层.querySelectorAll('.实例框')) {
+    if (el.dataset.id === 框.id || 全体.has(el.dataset.id)) continue;
+    if (在框里(框位, 元素的位(el))) 出.push(el);
   }
   return 出;
 }
@@ -4109,6 +4176,7 @@ function 存注释框() {
     项: 网.注释框们.map(f => ({
       id: f.id, 标题: f.标题 || '', x: f.x, y: f.y,
       宽: f.宽, 高: f.高, 色: f.色 || '', 收起: !!f.收起,
+      父: f.父 || '',
     })),
   });
 }
@@ -4194,27 +4262,47 @@ function 建注释框(框) {
     if (e.target.closest('.框角') || e.target.closest('.框叉')) return;
     // stopPropagation 挡舞台平移；但**不** preventDefault ——
     // 后者会掐掉后面的 click / dblclick，标题双击就改不了名了。
+    // 它也同时挡住了父框的拖动 —— 子框是父框的 DOM 子节点，冒泡本来就是分层的。
     e.stopPropagation();
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
-    const 起 = { x: e.clientX, y: e.clientY, ox: 框.x, oy: 框.y };
+    // 按下那一刻就把**绝对**位置记下来 —— 拖动全程用绝对坐标算，
+    // 跟「框现在挂在谁身上」无关。松手交给 归位() 换算回相对的。
+    const 我0 = 绝对位(框);
+    const 起 = { x: e.clientX, y: e.clientY, ax: 我0.x, ay: 我0.y };
     // 按住不动 = 单击，不该拖。走够 5px 才算拖（跟块那边的阈值一个道理）。
-    // 成员也等到这一刻才取 —— 按下的那一瞬间框还没动，这时候算出来的位才是真的。
-    let 员 = null;
+    // 实例框也等到这一刻才取 —— 按下那一瞬间位置才是准的。
+    //
+    // ⚠️ 只取**实例框**，不取子注释框：子框是 el 的 DOM 子节点，
+    //    移动 el 浏览器自然把它们带走，手写一遍等于挪两次。
+    let 实例员 = null;
+    let 提起过 = false;
     const 探 = ev => {
-      if (员) return;
+      if (实例员) return;
       if (Math.abs(ev.clientX - 起.x) + Math.abs(ev.clientY - 起.y) < 5) return;
-      员 = 框里成员(框).map(m => ({ el: m, 位: 元素的位(m), id: m.dataset.id }));
+      实例员 = 框里成员(框).filter(m => !m.classList.contains('注释框'))
+        .map(m => ({ el: m, 位: 元素的位(m), id: m.dataset.id }));
+      // ⚠️ 拖之前先把自己从父框里**提出来**挂到框层顶层，坐标换成画布的绝对值。
+      //    不提的话，left/top 是相对父框的 —— 拖出父框边界那一刻位置就错乱，
+      //    看着像「框的坐标跟鼠标对不上」。松手时 归位() 会重新挂回去。
+      //
+      // ⚠️ 父 字段必须跟着一起清。只改 x/y 不清父的话，绝对位() 会再叠一遍
+      //    祖先的偏移 —— 拖一下位置就飞出去（嵌套更深时飞得更远）。
+      框.x = 起.ax; 框.y = 起.ay; 框.父 = '';
+      el.style.left = 起.ax + 'px';
+      el.style.top = 起.ay + 'px';
+      网.框层.appendChild(el);
+      提起过 = true;
       el.classList.add('拖动中');
     };
     const 移 = ev => {
       探(ev);
       const z = 视.z || 1;
       const dx = (ev.clientX - 起.x) / z, dy = (ev.clientY - 起.y) / z;
-      框.x = Math.round(起.ox + dx);
-      框.y = Math.round(起.oy + dy);
+      框.x = Math.round(起.ax + dx);
+      框.y = Math.round(起.ay + dy);
       el.style.left = 框.x + 'px';
       el.style.top = 框.y + 'px';
-      for (const m of (员 || [])) {
+      for (const m of (实例员 || [])) {
         m.el.style.left = Math.round(m.位.x + dx) + 'px';
         m.el.style.top = Math.round(m.位.y + dy) + 'px';
         // ⚠️ 改字段，不要 set 一个新对象！
@@ -4232,28 +4320,90 @@ function 建注释框(框) {
     const 停 = () => {
       document.removeEventListener('pointermove', 移);
       document.removeEventListener('pointerup', 停);
+      归位(框);
       存布局(); 存注释框();
     };
     document.addEventListener('pointermove', 移);
     document.addEventListener('pointerup', 停);
   });
 
-  网.框层.appendChild(el);
+  // 挂到哪一层由调用方决定：顶层挂 #注释框层，子框挂父框自己身上。
+  // 这样浏览器保证「里面的永远画在外面的上面」，也保证事件先到里面再冒泡到外面。
+  return el;
+}
+
+// 松手之后重新算「这个框现在归谁」。
+//
+// 真父子之后，拖动改的只是它自己的绝对位置；**归谁**是另一件事，要在这里定下来。
+// 不重算的话会出现两种错：
+//   · 拖进大框里，它还是顶层 —— 大框一动它不跟着走（看着像「框里的东西不动」）
+//   · 拖出大框外，它还是子框 —— 位置越拖越偏（它的坐标相对一个它已经不在里面的框）
+//
+// 判定用**中心点**：整个框的中心落在谁里面就归谁。用角点的话，
+// 稍微压住一点就换爹，手一抖就跳。
+function 归位(框) {
+  const 我 = 绝对位(框);
+  const 心x = 我.x + 框.宽 / 2, 心y = 我.y + 框.高 / 2;
+
+  // 不能塞进自己或自己的后代里（那会成环，页面直接挂死）
+  const 不能当 = new Set([框.id, ...后代框们(框).map(f => f.id)]);
+  let 新父 = null;
+  for (const f of (网.注释框们 || [])) {
+    if (不能当.has(f.id)) continue;
+    const 位 = 绝对位(f);
+    if (心x > 位.x && 心x < 位.x + f.宽 && 心y > 位.y && 心y < 位.y + f.高) {
+      // 取最深的那层：嵌了三层就归最里面那个，不归外层
+      if (!新父 || f.宽 * f.高 < 新父.宽 * 新父.高) 新父 = f;
+    }
+  }
+
+  const 新父id = 新父 ? 新父.id : '';
+  const 旧父id = 框.父 || '';
+  const 新父位 = 新父 ? 绝对位(新父) : { x: 0, y: 0 };
+  // 坐标是相对父的，换了爹就得换算，不然位置当场跳走
+  const 新x = Math.round(我.x - 新父位.x), 新y = Math.round(我.y - 新父位.y);
+
+  if (新父id === 旧父id) {
+    // 没换爹，但要确认坐标真的是相对当前父的（拖过就变了，得写回去）
+    if (框.x !== 新x || 框.y !== 新y) { 框.x = 新x; 框.y = 新y; }
+    // DOM 得跟着走：拖出来的时候它还在原来的父框里，位置却是按画布算的
+  } else {
+    框.父 = 新父id;
+    框.x = 新x; 框.y = 新y;
+  }
+  // 一律重画一次 —— 换爹要搬 DOM，不换爹也要把 left/top 写成相对值。
+  // 重画很便宜（框有几十个就是上限），不要为了省这一下留一条「位置看着对、
+  // 数据是错的」的路。
+  画注释框们();
 }
 
 function 画注释框们() {
   if (!网.框层) return;
   网.框层.textContent = '';
-  // ⚠️ 按面积从大到小建：**大的先建（在下层），小的后建（在上层）**。
+  // 真父子：先建顶层，再递归把子框塞进父框里。
   //
-  // 框体现在是 pointer-events:auto，整块矩形都接住鼠标。
-  // 如果谁后建谁在上面，那就与大小无关了 ——
-  // 先建小框、再建一个包住它的大框，大框盖在上面，
-  // 小框的框体每一处都命中大框，等于**永远拖不动**（实测 3/3 采样点全部命中大框）。
-  // 按面积排之后，嵌套关系天然对：框里的框永远压在外面那层上面，
-  // 点里面就是拖里面的，点大框自己的空白就是拖大框。
-  const 序 = [...(网.注释框们 || [])].sort((a, b) => (b.宽 * b.高) - (a.宽 * a.高));
-  for (const 框 of 序) 建注释框(框);
+  // ⚠️ 这里不再需要「按面积排序」。层序由 DOM 结构决定 ——
+  //    子元素天然画在父元素上面，浏览器保证。之前靠排序是**近似**，
+  //    碰不到 create 顺序的坑（先建小框后建大框，大框就盖住小框）就会坏。
+  // 父指向一个不存在的框（被删了、或者老数据）一律当顶层 —— 不然那个框就消失了。
+  const 全体 = 网.注释框们 || [];
+  const 在的 = new Set(全体.map(f => f.id));
+  // 只算真正的父：父存在、不是自己、也不是自己的后代（数据成环时别把页面挂死）
+  const 真父 = f => {
+    const p = f.父 || '';
+    return (p && p !== f.id && 在的.has(p)) ? p : '';
+  };
+  const 挂 = (框, 父el, 走过) => {
+    if (走过.has(框.id)) return;           // 环，砍掉
+    走过.add(框.id);
+    const el = 建注释框(框);
+    父el.appendChild(el);
+    for (const 子 of 全体) if (真父(子) === 框.id) 挂(子, el, 走过);
+  };
+  // 深度优先建：环上的框永远不会从「顶层」进来，最后补一遍兜底
+  const 走过 = new Set();
+  for (const 框 of 全体) if (!真父(框)) 挂(框, 网.框层, 走过);
+  for (const 框 of 全体) if (!走过.has(框.id)) { 框.父 = ''; 挂(框, 网.框层, 走过); }
 }
 
 // Ctrl+左键在空白处拖 = 画一个新框。
@@ -4326,13 +4476,22 @@ document.addEventListener('keydown', e => {
     预览.remove();
     // 太小的当误触，不建 —— 右键本来就容易顺手按一下
     if (宽 < 40 || 高 < 40) return;
+    const 左 = Math.round(Math.min(起.x, p.x)), 上 = Math.round(Math.min(起.y, p.y));
+    // 落点在哪个框里，新框就归谁 —— 跟「在画布上拉一个」是一回事，
+    // 只不过拉在了某个框上面。这样不用先画再拖进去。
+    const 父 = 点下最深框(左 + 宽 / 2, 上 + 高 / 2);
+    let x = 左, y = 上;
+    if (父) {
+      const 父位 = 绝对位(父);
+      x = 左 - 父位.x; y = 上 - 父位.y;
+    }
     网.注释框们.push({
       id: '框' + Date.now().toString(36),
       标题: '',
-      x: Math.round(Math.min(起.x, p.x)),
-      y: Math.round(Math.min(起.y, p.y)),
+      x, y,
       宽: Math.round(宽), 高: Math.round(高),
       收起: false,
+      父: 父 ? 父.id : '',
     });
     画注释框们();
     存注释框();
@@ -4666,6 +4825,20 @@ function 退出画框() {
 
 function 删注释框(id) {
   const 前 = 网.注释框们.length;
+  const 要删 = (网.注释框们 || []).find(f => f.id === id);
+  if (!要删) return;
+  // ⚠️ 框改成真父子之后，直接删会把里面的框一起带走（它们是人家的 DOM 子节点）。
+  //    「框只是这段时间在弄的这堆，不是容器」—— 所以删框时把子框**提到它的上一层**，
+  //    位置换算成新坐标，内容一个不少。
+  const 我位 = 绝对位(要删);
+  const 新父 = 要删.父 && (网.注释框们 || []).some(f => f.id === 要删.父) ? 要删.父 : '';
+  const 父位 = 新父 ? 绝对位(找框(新父)) : { x: 0, y: 0 };
+  for (const 子 of (网.注释框们 || [])) {
+    if ((子.父 || '') !== id) continue;
+    子.父 = 新父;                        // 提到上一层（可能是顶层）
+    子.x = Math.round(子.x + 我位.x - 父位.x);
+    子.y = Math.round(子.y + 我位.y - 父位.y);
+  }
   网.注释框们 = (网.注释框们 || []).filter(f => f.id !== id);
   if (网.注释框们.length === 前) return;
   画注释框们();
