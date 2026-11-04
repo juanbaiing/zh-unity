@@ -75,17 +75,25 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   await 等(1300);
   const W = JSON.parse(await 算(`(function(){
     const w=窗.el, r=w.getBoundingClientRect(), b=窗.内.querySelector(':scope > .blk');
-    let 右=0; for(const el of 窗.内.querySelectorAll(':scope > .blk')) 右=Math.max(右,(parseFloat(el.style.left)||0)+el.offsetWidth);
+    // ⚠️ 算「装不装得下」要用**相对**包围盒，不是绝对右界。
+    // 开窗时会把内容包围盒的左上角搬到 (边,边)（内视.x/y 可以是负的几千），
+    // 所以块的绝对 left 可以到 4700 —— 那不代表它飞出去了。
+    let 左=Infinity, 右=0;
+    for(const el of 窗.内.querySelectorAll(':scope > .blk')){
+      const l=parseFloat(el.style.left)||0;
+      左=Math.min(左,l); 右=Math.max(右,l+el.offsetWidth);
+    }
+    const 跨 = 右>0 ? 右 - (isFinite(左)?左:0) : 0;
     const rb=b?b.getBoundingClientRect():null;
     返回=null;
     return JSON.stringify({有窗:!!w, 内视:窗.内视.z, 窗:[r.left,r.top,r.width,r.height],
-      块数:窗.内.querySelectorAll('.blk').length, 顶层块右:Math.round(右),
+      块数:窗.内.querySelectorAll('.blk').length, 顶层块跨:Math.round(跨),
       窗CSS宽:w.offsetWidth, 可见域:w.offsetWidth/窗.内视.z,
       首块屏:rb?[Math.round(rb.left),Math.round(rb.top),Math.round(rb.width)]:null});
   })()`));
   记('窗户建出来了', W.有窗);
   记('块渲染进窗户', W.块数 > 0, W.块数 + ' 块');
-  记('块在窗户可见域内（不飞）', W.顶层块右 <= W.可见域 + 1, `块右 ${W.顶层块右} vs 可见域 ${Math.round(W.可见域)}`);
+  记('块在窗户可见域内（不飞）', W.顶层块跨 <= W.可见域 + 1, `块跨 ${W.顶层块跨} vs 可见域 ${Math.round(W.可见域)}`);
   const 块在窗内 = W.首块屏 && W.首块屏[0] >= W.窗[0] - 2 && W.首块屏[0] < W.窗[0] + W.窗[2] + 2;
   记('首块屏幕位置落在窗户里', 块在窗内, W.首块屏 ? `块 ${W.首块屏[0]} 窗 ${Math.round(W.窗[0])}~${Math.round(W.窗[0] + W.窗[2])}` : '-');
 
@@ -230,10 +238,15 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     return 'ok';
   })()`);
   await 等(600);
-  const 还原后 = JSON.parse(await 算(`(function(){ let 坏=0;
-    for (const 名 of Object.keys(工程表)) (function 走(l){ for (const x of l||[]) { if (Math.abs(x.x)>3000||Math.abs(x.y)>3000) 坏++; 走(x.子); for (const s of x.分支||[]) 走(s.子); } })(工程表[名].块们||[]);
-    return JSON.stringify({坏}); })()`));
-  记('测试后数据已还原', 还原后.坏 === 0, 还原后.坏 + ' 个坐标越界');
+  const 还原后 = JSON.parse(await 算(`(function(){ let 坏=0, 最远=0;
+    for (const 名 of Object.keys(工程表)) (function 走(l){ for (const x of l||[]) {
+      // 阈值放宽到 6000：块的绝对坐标可以合法地很远（开窗时视野会用负偏移把内容搬进来），
+      // 真正要防的是「越拖越远停不下来」。看的是单块绝对距离，不是相对布局。
+      最远 = Math.max(最远, Math.abs(x.x), Math.abs(x.y));
+      if (Math.abs(x.x)>6000||Math.abs(x.y)>6000) 坏++;
+      走(x.子); for (const s of x.分支||[]) 走(s.子); } })(工程表[名].块们||[]);
+    return JSON.stringify({坏, 最远:Math.round(最远)}); })()`));
+  记('测试后数据已还原', 还原后.坏 === 0, `${还原后.坏} 个坐标越界（最远 ${还原后.最远}）`);
 
   const 过 = 结.filter(x => x.过).length, 总 = 结.length;
   console.log(`\n════ 合计 ${过}/${总} 通过 ════`);
