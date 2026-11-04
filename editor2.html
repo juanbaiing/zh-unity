@@ -3666,7 +3666,120 @@ function 选走线(x1, y1, x2, y2, 框位, 自id, 到id, 竖) {
     }
     return 折线成路(正交点(x1, y1, x2, y2, 框位, 自id, 到id), 14);
   }
-  return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
+
+  // ── 曲线 + 只在该避的时候才避 ──
+  //
+  // 曲线好看（短距离就该是软的），但它**一点避让都没有**：中间横着个框，
+  // 它就从框里穿过去。实测 Coin→Cube 那条钻进 Cube 内部走了一大段才出来，
+  // 看着像「连到了 Cube 上」—— 学术里叫 edge ambiguity
+  // （Ambiguity-Free Edge-Bundling, TVCG：线压在不相关节点上会让人误判连接关系）。
+  //
+  // 所以不是把曲线全改成折线，而是：
+  //   1. 先按曲线密采样，一个不相干的框都不撞 → 就是它，原样返回
+  //   2. 撞了 → 拿撞到的那些框当障碍，生成「上/下/左/右」四种绕法
+  //   3. 四种都密采样评分（穿框数 > 长度），选最好的，拐角磨圆
+  // 绝大多数短线还是曲线，只有真被挡住的那几条会变成绕行。
+  const 曲线点 = 密采样(曲线采样(x1, y1, x2, y2, 竖));
+  const 曲线撞 = 撞了谁(曲线点, 框位, 自id, 到id);
+  if (!曲线撞.size) return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
+
+  const 障碍 = [...曲线撞].map(id => 框位.get(id)).filter(Boolean);
+  let 最好 = null, 最好分 = Infinity;
+  for (const 点们 of 绕行候选(x1, y1, x2, y2, 障碍, 竖)) {
+    const 密 = 密采样(点们);
+    const 分 = 撞了谁(密, 框位, 自id, 到id).size * 10000 + 点列长度(密);
+    if (分 < 最好分) { 最好分 = 分; 最好 = 点们; }
+  }
+  // 四种都还穿的话，也是「穿得最少的那条」比原曲线强，照样用
+  return 最好 ? 折线成路(最好, 14) : (竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2));
+}
+
+// ── 避让要用的小工具 ────────────────────────────────────
+
+const 避让边距 = 16;
+
+// 三次贝塞尔取一个点
+function 贝塞尔(x1, y1, c1x, c1y, c2x, c2y, x2, y2, t) {
+  const u = 1 - t;
+  return [u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2,
+          u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2];
+}
+
+// 按当前走线法把一条曲线采成点列 —— 判「撞没撞框」要用它。
+// 控制点的算法必须跟 曲线路() / 曲线路竖() 完全一致，不然判的是一条线、画的是另一条。
+function 曲线采样(x1, y1, x2, y2, 竖, 段数 = 30) {
+  const 点 = [];
+  if (竖) {
+    const 距 = Math.abs(y2 - y1);
+    const 伸 = Math.min(Math.max(距 * 0.45, 26), 150);
+    const 朝 = y2 >= y1 ? 1 : -1;
+    for (let i = 0; i <= 段数; i++)
+      点.push(贝塞尔(x1, y1, x1, y1 + 朝 * 伸, x2, y2 - 朝 * 伸, x2, y2, i / 段数));
+  } else {
+    const 距 = Math.abs(x2 - x1);
+    const 伸 = Math.min(Math.max(距 * 0.5, 30), 180);
+    const 朝 = x2 >= x1 ? 1 : -1;
+    for (let i = 0; i <= 段数; i++)
+      点.push(贝塞尔(x1, y1, x1 + 朝 * 伸, y1, x2 - 朝 * 伸, y2, x2, y2, i / 段数));
+  }
+  return 点;
+}
+
+// 折线首尾之间补点。只拿 4 个拐点去判撞框会漏 —— 长直段整个跳过去了。
+function 密采样(点们, 步 = 4) {
+  if (!点们 || !点们.length) return [];
+  const 出 = [点们[0]];
+  for (let i = 1; i < 点们.length; i++) {
+    const [ax, ay] = 点们[i - 1], [bx, by] = 点们[i];
+    const 长 = Math.hypot(bx - ax, by - ay);
+    const n = Math.max(1, Math.ceil(长 / 步));
+    for (let k = 1; k <= n; k++) 出.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n]);
+  }
+  return 出;
+}
+
+// 这条点列穿过了哪些**不相干**的框。
+// 源框和目标框排除 —— 线落在「脚本行」上，行在框内部，从框边进到那一行
+// 必然穿一小段自己的框，那是它该走的路（跟 _全测.js 里那条判据同一个口径）。
+function 撞了谁(点们, 框位, 自id, 到id) {
+  const 撞 = new Set();
+  for (const [x, y] of 点们) {
+    for (const [id, b] of 框位) {
+      if (id === 自id || id === 到id) continue;
+      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) 撞.add(id);
+    }
+  }
+  return 撞;
+}
+
+function 点列长度(点们) {
+  let 长 = 0;
+  for (let i = 1; i < 点们.length; i++) 长 += Math.hypot(点们[i][0] - 点们[i - 1][0], 点们[i][1] - 点们[i - 1][1]);
+  return 长;
+}
+
+// 四种绕法：从障碍的上方 / 下方 / 左方 / 右方兜过去。
+//
+// 只用**真撞到的那些框**算边界，不是全图 —— 拿全图包围盒会绕出去半张画布
+// （正交那版的实测教训：量出来宽 703 高 836）。四个都生成，交给调用方评分。
+function 绕行候选(x1, y1, x2, y2, 障碍, 竖) {
+  const 出 = [];
+  if (!障碍 || !障碍.length) return 出;
+  let 上 = Infinity, 下 = -Infinity, 左 = Infinity, 右 = -Infinity;
+  for (const b of 障碍) {
+    上 = Math.min(上, b.y); 下 = Math.max(下, b.y + b.h);
+    左 = Math.min(左, b.x); 右 = Math.max(右, b.x + b.w);
+  }
+  上 -= 避让边距; 下 += 避让边距; 左 -= 避让边距; 右 += 避让边距;
+
+  // 上下兜
+  出.push([[x1, y1], [x1, 上], [x2, 上], [x2, y2]]);
+  出.push([[x1, y1], [x1, 下], [x2, 下], [x2, y2]]);
+  // 左右兜
+  出.push([[x1, y1], [左, y1], [左, y2], [x2, y2]]);
+  出.push([[x1, y1], [右, y1], [右, y2], [x2, y2]]);
+  // 竖着连的时候优先左右兜，但同时兜还是给上 —— 万一障碍在两侧
+  return 竖 ? 出.reverse() : 出;
 }
 
 // 从 (x1,y1) 到 (x2,y2) 的一条正交折线，返回**点列表**（不是 path 字符串）。
