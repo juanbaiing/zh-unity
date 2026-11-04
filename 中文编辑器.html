@@ -2170,6 +2170,7 @@ function 缩外层(clientX, clientY, 放大) {
   // 事件发生在窗户里就让开 —— 那一下归窗户自己缩。
   // 不靠窗户那边 stopPropagation 兜着，两边各判各的，谁也漏不了。
   if (!e.shiftKey && e.target.closest && e.target.closest('.窗户')) return;
+  if (!e.shiftKey && e.target.closest && e.target.closest('.孤岛框')) return;
   e.preventDefault();
   缩外层(e.clientX, e.clientY, e.deltaY < 0);
 }, { passive: false });
@@ -4036,9 +4037,12 @@ function 建孤岛框(孤) {
   体.appendChild(说);
   el.appendChild(体);
 
-  头.addEventListener('pointerdown', e => {
+  el.addEventListener('pointerdown', e => {
     if (e.button !== 0 || e.target.closest('.编钮')) return;
+    // ⚠️ 必须挡住传播。不挡的话事件冒泡到舞台，外层画布也开始平移 ——
+    //    表现就是「鼠标一按上去，孤岛框跟着整张网跑，抓不住」。
     e.preventDefault();
+    e.stopPropagation();
     const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
     const 移 = ev => {
       位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
@@ -4048,12 +4052,15 @@ function 建孤岛框(孤) {
       画线();
     };
     const 停 = () => {
-      头.removeEventListener('pointermove', 移);
-      头.removeEventListener('pointerup', 停);
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
       存布局();
     };
-    头.addEventListener('pointermove', 移);
-    头.addEventListener('pointerup', 停);
+    // ⚠️ 绑 document 不绑 头：框只有几十像素宽，鼠标一出框 pointermove 就断了，
+    //    拖动看起来像「抓不住」。
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
   });
 
   网.层.appendChild(el);
