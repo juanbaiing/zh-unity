@@ -2134,7 +2134,9 @@ function 应用视() {
 // 事件冒泡不到这里，窗户那边的 Shift+滚只能自己调这个。
 function 缩外层(clientX, clientY, 放大) {
   const 前 = 视.z;
-  const 后 = Math.min(3, Math.max(0.2, 前 * (放大 ? 1.12 : 1 / 1.12)));
+  // 上限原来写死 3 倍 —— 没什么理由，当时随手定的。块要凑近看细节，
+  // 3 倍根本不够（一个类块两千多像素高）。放到 10 倍，缩到 0.1。
+  const 后 = Math.min(10, Math.max(0.1, 前 * (放大 ? 1.12 : 1 / 1.12)));
   // 光标指着的那一点，缩放前后要停在原地
   const r = 舞台.getBoundingClientRect();
   const mx = clientX - r.left, my = clientY - r.top;
@@ -4174,8 +4176,13 @@ function 框够大(实例el) {
 
 function 应用内视() {
   if (!窗.内) return;
-  窗.内.style.setProperty('--内x', 窗.内视.x + 'px');
-  窗.内.style.setProperty('--内y', 窗.内视.y + 'px');
+  // ⚠️ 内视.x/y 存的是**屏幕像素**（鼠标拖多少就是多少），
+  //    但这个元素长在 #world 里，#world 自己有 scale(视.z) ——
+  //    直接写成 px 会被外层再放大一次。实测：拖 80px，内容在屏幕上跑 160px，
+  //    所以内层拖动「太快」。落成 CSS 之前除掉外层缩放，两边都是屏幕像素。
+  const 外z = 视.z || 1;
+  窗.内.style.setProperty('--内x', (窗.内视.x / 外z) + 'px');
+  窗.内.style.setProperty('--内y', (窗.内视.y / 外z) + 'px');
   窗.内.style.setProperty('--内z', 窗.内视.z);
 }
 
