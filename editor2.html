@@ -105,7 +105,7 @@
   .code.收>.title,.code.收>.codelines,.code.收>.warn,.code.收>.errs{display:none}
   /* 收起钮必须**常驻**。只在收起时才显示的话，展开状态就点不到它，
      于是永远收不起来 —— 这个坑踩过一次。 */
-  .栏条{position:absolute;top:6px;right:6px;width:18px;height:18px;z-index:8;
+  .栏条{position:absolute;top:4px;right:4px;width:18px;height:18px;z-index:8;
     display:flex;align-items:center;justify-content:center;
     font-size:var(--字标);color:var(--字3);cursor:pointer;user-select:none;
     border:1px solid var(--line);border-radius:4px;background:var(--panel)}
@@ -121,15 +121,18 @@
     margin-top:-17px;background:var(--线亮);border-radius:1px;transition:background .12s}
   .边栏把:hover::after,.边栏把.按着::after{background:var(--cn)}
   .边栏把:hover,.边栏把.按着{background:color-mix(in srgb, var(--cn) 13%, transparent)}
-  .palette .边栏把{right:-3px}
+  .palette .边栏把{right:0}
   .palette .边栏把::after{left:3px}
-  .code .边栏把{left:-3px}
+  /* 右栏把手贴内侧：写到 -3px 会伸进相邻的 .mid 那一列，被盖住就点不到 */
+  .code .边栏把{left:0}
   .code .边栏把::after{left:3px}
   /* 右边栏要能拖宽，必须给确定宽度，不能再 flex:4 抢 */
   .code{position:relative;width:380px;flex:none;min-width:0}
 
   .palette{width:170px;flex:none;background:var(--panel);border-right:1px solid var(--line);
     padding:8px 8px;overflow:auto;position:relative}
+  /* 标题右边留出收起钮的位置 —— 不留的话按钮会压在标题和「✓ 编译通过」上 */
+  .palette>h2{padding-right:24px}
   /* 用 grid + auto-fill：栏拖宽了列数自己变，不用改一个数字 */
   #palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));
     gap:12px 8px;align-items:start}
@@ -247,7 +250,7 @@
     color:var(--字4);font-size:var(--字正文);pointer-events:none}
   .body:has(> .blk)::after{display:none}
 
-  .palette-grip{position:absolute;top:0;right:-3px;width:8px;height:100%;
+  .palette-grip{display:none;position:absolute;top:0;right:0;width:8px;height:100%;
     cursor:col-resize;z-index:6}
   .palette-grip::after{content:'';position:absolute;top:50%;left:3px;width:2px;height:34px;
     margin-top:-16px;background:var(--字4);border-radius:4px;transition:background .12s}
@@ -308,9 +311,13 @@
   .branch{border-top:1px dashed var(--线亮)}
   .branch .head{padding:8px 12px;cursor:default}
 
-  .code{flex:4 1 0;min-width:300px;border-left:1px solid var(--line);display:flex;flex-direction:column}
-  .code .title{padding:4px 12px;font-size:var(--字标);line-height:16px;color:var(--字3);
-    border-bottom:1px solid var(--line);background:var(--panel)}
+  /* ⚠️ 这里不能再写 flex —— 上面那条 .code 已经定了 width + flex:none。
+     写成 flex:4 1 0 的话，同优先级下后写的赢，宽度永远被压回去，
+     拖拽设了 640px 实际只剩 560（实测）。 */
+  .code{border-left:1px solid var(--line);display:flex;flex-direction:column}
+  .code .title{padding:8px 28px 8px 12px;font-size:var(--字标);line-height:16px;color:var(--字3);
+    border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;justify-content:space-between;gap:8px}
   /* 中间层单独一列。默认收成一条竖条（不占地方），点开才铺开，
      这样块、中文写法、C# 能横向对着看。 */
   .mid{flex:none;width:34px;background:var(--panel);border-left:1px solid var(--line);
