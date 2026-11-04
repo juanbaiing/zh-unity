@@ -566,6 +566,38 @@
     text-decoration-color:#c8a860;
   }
 
+  /* ---------------- 落地页（总览） ----------------
+     关系网回答「这几个对象怎么互相调用」，这里回答「这项目里都有什么」。
+     刻意做得素：一屏卡片，点进去就是网 / 块画布，没有二级导航。 */
+  .总览{position:fixed;inset:0;z-index:600;background:var(--bg);display:flex;flex-direction:column}
+  .总览.hidden{display:none}
+  .总览头{display:flex;align-items:baseline;gap:var(--区);padding:var(--区);
+    border-bottom:1px solid var(--line)}
+  .总览题{display:flex;align-items:baseline;gap:var(--隔);flex:1;min-width:0}
+  .总览题 b{font-size:var(--字块名);color:var(--字1);font-weight:600}
+  .总览副{font-size:var(--字标);color:var(--dim);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .总览关{flex:none;width:28px;height:28px;border:1px solid var(--line);background:var(--钮);
+    color:var(--text);border-radius:6px;cursor:pointer;font-size:16px;line-height:1}
+  .总览关:hover{border-color:#3a4a5e;color:var(--字1)}
+  .总览身{flex:1;min-height:0;overflow:auto;padding:var(--区);
+    display:flex;flex-direction:column;gap:var(--区)}
+  .组名{font-size:var(--字标);color:var(--dim);margin-bottom:var(--缝);
+    display:flex;gap:var(--缝);align-items:baseline}
+  .组名 b{color:var(--字1);font-weight:600;font-size:var(--字正文)}
+  .总览格{display:grid;grid-template-columns:repeat(auto-fill,minmax(208px,1fr));gap:var(--缝)}
+  .总览卡{border:1px solid var(--line);border-radius:8px;padding:var(--缝) var(--隔);
+    cursor:pointer;background:var(--panel);transition:border-color .12s,background .12s}
+  .总览卡:hover{border-color:#3a4a5e;background:var(--钮)}
+  .总览卡 .卡名{font-size:var(--字正文);color:var(--字1);
+    display:flex;align-items:baseline;gap:var(--缝)}
+  .总览卡 .卡名 em{font-style:normal;font-size:var(--字标);color:var(--dim)}
+  .总览卡 .卡注{font-size:var(--字标);color:var(--dim);margin-top:var(--空隙);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .总览卡.空{opacity:.55;cursor:default}
+  .总览卡.空:hover{border-color:var(--line);background:var(--panel)}
+  .总览空{color:var(--dim);font-size:var(--字正文)}
+
   .errcount{float:right;font-size:var(--字标);color:var(--dim)}
   .errcount.有错{color:var(--bad)}
   .errs{flex:none;max-height:38%;overflow:auto;border-top:1px solid var(--错线);
@@ -600,9 +632,23 @@
   <button id="copyBtn">复制 C#</button>
   <button id="组件口钮" title="现在显示「连到 Unity 组件」的小圆标记，点一下收起">组件口</button>
   <button id="clearBtn">清空</button>
+  <button id="总览钮" title="摊开这个 Unity 里的所有场景、脚本、预制体">总览</button>
 </header>
 
 <nav id="tabs" class="tabs"></nav>
+
+<!-- 落地页：点「总览」出来。这是关系网的上一层 ——
+     网回答「这几个对象怎么互相调用」，这里回答「这项目里都有什么」。 -->
+<div id="总览" class="总览 hidden">
+  <div class="总览头">
+    <div class="总览题">
+      <b>这个 Unity 项目里有什么</b>
+      <span id="总览副" class="总览副"></span>
+    </div>
+    <button id="总览关" class="总览关" title="关掉，回到关系网（Esc）">×</button>
+  </div>
+  <div class="总览身" id="总览身"></div>
+</div>
 
 <main>
   <aside class="palette">
@@ -3698,7 +3744,12 @@ document.addEventListener('pointerdown', e => {
 // 那时候按钮就在屏幕外面，点不着，人就卡在编辑器里出不来。
 // 退出口不能只挂在框头上，键盘得有一个。
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && 窗.el) { e.preventDefault(); 关窗(); return; }
+  if (e.key !== 'Escape') return;
+  // 谁在最上面就先关谁：总览盖在窗户之上，所以它先走。
+  // （反过来写的话，开着窗时按 Esc 只会关窗，总览会留在屏幕上不动 —— 看着像 Esc 失灵。）
+  const 板 = document.getElementById('总览');
+  if (板 && !板.classList.contains('hidden')) { e.preventDefault(); 关总览(); return; }
+  if (窗.el) { e.preventDefault(); 关窗(); }
 });
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { 关说明(); 关选项(); } });
@@ -4963,6 +5014,10 @@ document.getElementById('组件口钮').onclick = () => {
   切组件口();
   画线();
 };
+
+// 总览：这个是「整个项目里都有什么」的入口，跟「组件口」那种显示开关不是一类东西。
+document.getElementById('总览钮').onclick = 开总览;
+document.getElementById('总览关').onclick = 关总览;
 
 // ---------------- 存到 Unity ----------------
 // 整份覆盖写，不是追加 —— 同一张画布改十次，文件里永远只有这一份。
@@ -6309,9 +6364,140 @@ function 画脚本索引() {
   for (const 孤 of 网.孤岛们 || []) 加(孤.名, '', true, 孤.id);
 }
 
+// ---------------- 落地页（总览） ----------------
+// 关系网回答「这几个对象怎么互相调用」，这一层回答「整个项目里都有什么」。
+// 不做二级导航：一屏卡片，点场景 = 回到那张网，点脚本 = 打开那个脚本的块。
+//
+// 数据全从已有的网上来（网.实例们 的 id 前缀分「场景 / 代码 / 预制体」），
+// 不另外存一份 —— 多一份数据就多一处会不同步。
+function 开总览() {
+  const 板 = document.getElementById('总览');
+  if (!板) return;
+  画总览();
+  板.classList.remove('hidden');
+}
+
+function 关总览() {
+  const 板 = document.getElementById('总览');
+  if (板) 板.classList.add('hidden');
+}
+
+function 总览着一张卡(名, 注, 点) {
+  const 卡 = document.createElement('div');
+  卡.className = '总览卡' + (点 ? '' : ' 空');
+  const 一 = document.createElement('div');
+  一.className = '卡名';
+  一.textContent = 名;
+  const 二 = document.createElement('div');
+  二.className = '卡注';
+  二.textContent = 注;
+  卡.appendChild(一);
+  卡.appendChild(二);
+  if (点) 卡.addEventListener('click', 点);
+  return 卡;
+}
+
+function 画总览() {
+  const 身 = document.getElementById('总览身');
+  const 副 = document.getElementById('总览副');
+  if (!身) return;
+  身.textContent = '';
+
+  const 实们 = 网.实例们 || [];
+  const 孤们 = 网.孤岛们 || [];
+  const 目录 = document.getElementById('unityDir');
+  if (副) {
+    // #unityDir 的文本是「Unity 目录：D:/...」，前缀这里不要 —— 标题已经说了是哪个 Unity
+    const 路 = ((目录 && 目录.textContent) || '').replace(/^Unity\s*目录：\s*/, '');
+    副.textContent = 路;
+    if (网.开) 副.textContent = 路 + (路 ? '　·　' : '') + 实们.length + ' 个对象，' + 孤们.length + ' 个没人挂的脚本';
+  }
+
+  const 一组 = (标题, 小字, 卡们) => {
+    const 组 = document.createElement('div');
+    const 头 = document.createElement('div');
+    头.className = '组名';
+    const 强 = document.createElement('b');
+    强.textContent = 标题;
+    头.appendChild(强);
+    if (小字) 头.appendChild(document.createTextNode(小字));
+    组.appendChild(头);
+    if (!卡们.length) {
+      const 空 = document.createElement('div');
+      空.className = '总览空';
+      空.textContent = '（没有）';
+      组.appendChild(空);
+    } else {
+      const 格 = document.createElement('div');
+      格.className = '总览格';
+      for (const 卡 of 卡们) 格.appendChild(卡);
+      组.appendChild(格);
+    }
+    身.appendChild(组);
+  };
+
+  if (!网.开 || !实们.length) {
+    const 空 = document.createElement('div');
+    空.className = '总览空';
+    空.textContent = '还没从 Unity 拉到东西。点顶上的「扫描项目」，扫一遍就有了。';
+    身.appendChild(空);
+    return;
+  }
+
+  // ① 场景：id 是 「场景|场景名.对象名」
+  const 场景表 = new Map();
+  for (const 实 of 实们) {
+    const 段 = String(实.id).split('|');
+    if (段[0] !== '场景') continue;
+    const 场景名 = String(段[1] || '').split('.')[0] || '（没名字的场景）';
+    if (!场景表.has(场景名)) 场景表.set(场景名, { 对象: 0, 脚本: 0 });
+    const 槽 = 场景表.get(场景名);
+    槽.对象++;
+    槽.脚本 += (实.脚本 || []).length;
+  }
+  一组('场景', 场景表.size + ' 个', [...场景表].map(([名, 槽]) =>
+    总览着一张卡(名, 槽.对象 + ' 个对象 · ' + 槽.脚本 + ' 个脚本', () => {
+      // 现在只有一个场景，回去就是这张网；将来多场景时在这里按场景过滤
+      关总览();
+      画网(网.图 || { 实例们: 实们, 线: 网.线们, 孤岛们: 孤们 }, 网.开);
+    })));
+
+  // ② 脚本：实例上挂的 + 没人挂的
+  const 卡们 = [];
+  for (const 实 of 实们) {
+    for (const sc of 实.脚本 || []) {
+      const 名 = sc && sc.名;
+      if (!名) continue;
+      const 出口 = (sc.出口 || []).filter(e => e.到).length;
+      卡们.push(总览着一张卡(名, '挂在 ' + (实.名 || 实.id) + ' · 往外伸 ' + 出口 + ' 处', () => {
+        const 框 = 网.层 && 网.层.querySelector('.实例框[data-id="' + CSS.escape(实.id) + '"]');
+        关总览();
+        if (框) 开窗(框, 名);
+      }));
+    }
+  }
+  for (const 孤 of 孤们) {
+    卡们.push(总览着一张卡(孤.名, '没有人挂它', () => {
+      关总览();
+      对准目标(孤.id);
+    }));
+  }
+  一组('脚本', 卡们.length + ' 个', 卡们);
+
+  // ③ 其余层（代码 / 预制体）—— 有才列
+  const 层表 = new Map();
+  for (const 实 of 实们) {
+    const 头 = String(实.id).split('|')[0];
+    if (头 === '场景') continue;
+    层表.set(头, (层表.get(头) || 0) + 1);
+  }
+  if (层表.size) {
+    一组('别的', [...层表].map(([k, n]) => k + ' ' + n).join('　'), []);
+  }
+}
+
 // 把视野挪到某个框上，保持当前缩放
-function 对准目标(id) {
-  const el = 网.层 && 网.层.querySelector('.实例框[data-id="' + CSS.escape(id) + '"]');
+function 对准目标(id) {  const el = 网.层 && 网.层.querySelector('.实例框[data-id="' + CSS.escape(id) + '"]');
   if (!el) return;
   const 台 = 舞台.getBoundingClientRect();
   const z = 视.z || 1;

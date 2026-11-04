@@ -72,6 +72,7 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
       .filter(e=>!e.classList.contains('空头框') && !e.classList.contains('孤岛框'))
       .map(e=>({id:e.dataset.id, x:parseFloat(e.style.left)||0, y:parseFloat(e.style.top)||0,
                 w:e.offsetWidth, h:e.offsetHeight}));
+    const 交=(a,b)=>a.x<b.x+b.w && b.x<a.x+a.w && a.y<b.y+b.h && b.y<a.y+a.h;
     const 查=[];
     for(const p of document.querySelectorAll('#线层 path[data-自]')){
       const d=p.getAttribute('d')||'';
@@ -79,11 +80,16 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
       const 长=p.getTotalLength();
       if(!长) continue;
       const 自=String(p.dataset.自||''), 到=String(p.dataset.到||'');
+      const 自家=框们.find(b=>b.id===自), 到家=框们.find(b=>b.id===到);
       const 撞=new Set();
       for(let 沿=0; 沿<=长; 沿+=Math.max(2, 长/300)){
         const pt=p.getPointAtLength(沿);
         for(const b of 框们){
           if(b.id===自 || b.id===到) continue;
+          // ⚠️ 跟源框或目标框**自己重叠**的框不算「不相干」：
+          //    两个实例框压在一起时，线从源框出发必然先钻进邻居，
+          //    这不是绕行能解决的问题，是布局问题（实测 coin 和 Main Camera 就压着）。
+          if((自家 && 交(b,自家)) || (到家 && 交(b,到家))) continue;
           if(pt.x>b.x+2&&pt.x<b.x+b.w-2&&pt.y>b.y+2&&pt.y<b.y+b.h-2) 撞.add(b.id);
         }
       }
