@@ -269,9 +269,17 @@
   #线层{position:absolute;left:0;top:0;z-index:2;pointer-events:none}
   #网层{position:absolute;left:0;top:0;z-index:3}
 
+  /* ⚠️ 框体必须能抓。
+     原来是 pointer-events:none —— 只有框头（26px）能拖，框体整块穿透。
+     实测：大框里套小框时，拖小框的框体 → 事件落到 #world → 平移画布，
+     看着就是「框内框拖不动」。框头只占整体面积一成多，缩小后丢得更狠
+     （z=0.42 时框头只有 11 屏幕像素高）。
+     改成 auto 之后：拖框体 = 拖这个框；框外的空白仍然是平移画布。
+     不会挡住外面的实例框和线 —— 框层 z-index 1，网层 3、线层 2 都在它上面。
+     .拖出中（正在拉的那个预览框）单独关掉，不然它会挡住 pointermove 的落点判定。 */
   .注释框{position:absolute;border:1px solid #3d5064;border-radius:10px;
     background:color-mix(in srgb, #4a6a8a 7%, transparent);
-    pointer-events:none;box-sizing:border-box}
+    pointer-events:auto;box-sizing:border-box}
   /* ⚠️ 框头要整条能抓 —— 它只有 26px 高，缩到「只有标题文字能点」就只剩几十像素，
      实测在 0.42 倍缩放下标题条只有 40×6 个屏幕像素，根本点不中，整个框就拖不动了。
      框头盖不住下面的实例框：框层 z-index 1、网层 z-index 3，实例框本来就在上面。 */
@@ -297,7 +305,7 @@
   .注释框.选中{border-color:#7a8fa8;box-shadow:0 0 0 1px #7a8fa855}
   .注释框 .框标题{cursor:text;outline:none}
   .注释框 .框标题:empty::before{content:'未命名';color:#3d5064}
-  .注释框.拖出中{border-style:dashed;background:color-mix(in srgb, #4a6a8a 12%, transparent)}
+  .注释框.拖出中{pointer-events:none;border-style:dashed;background:color-mix(in srgb, #4a6a8a 12%, transparent)}
   .注释框.收起{height:26px ;overflow:hidden;background:color-mix(in srgb, #4a6a8a 14%, transparent)}
 
   /* ---------- 网层：Unity 场景里的实例 ----------     和块在同一张画布、同一套坐标里 ——「实例就是另类的代码块」。
@@ -4158,7 +4166,8 @@ function 建注释框(框) {
     el.appendChild(h);
   }
 
-  头.addEventListener('contextmenu', e => {
+  el.addEventListener('contextmenu', e => {
+    if (e.target.closest('.框角')) return;
     e.preventDefault(); e.stopPropagation();
     const 单 = 做右键单();
     const 注 = document.createElement('div');
@@ -4169,22 +4178,43 @@ function 建注释框(框) {
     摆右键单(单, e);
   });
 
-  头.addEventListener('pointerdown', e => {
+  // 拖整个框 —— 不光是框头。
+  //
+  // ⚠️ 原来只绑在 .框头 上，框体又是 pointer-events:none，于是：
+  //    大框里套的小框，抓它的框体 → 事件落到 #world → 整张画布平移。
+  //    使用者看到的就是「框内框拖不动」。框头只有 26px（CSS），
+  //    z=0.42 时剩 11 屏幕像素，那一细条本来就点不准。
+  //    现在框体本身能抓（见 .注释框 的 CSS），拖动挂在整个 el 上。
+  //    框角、× 各自有 stopPropagation，不会被这里抢走。
+  el.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+    // Ctrl 拖 = 在框里再画一个（嵌套框）；等画框状态同理。交给舞台那个 handler。
+    if (e.ctrlKey || 等画框) return;
     if (标.contentEditable === 'true') return;   // 正在改标题
-    e.preventDefault(); e.stopPropagation();
+    if (e.target.closest('.框角') || e.target.closest('.框叉')) return;
+    // stopPropagation 挡舞台平移；但**不** preventDefault ——
+    // 后者会掐掉后面的 click / dblclick，标题双击就改不了名了。
+    e.stopPropagation();
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
     const 起 = { x: e.clientX, y: e.clientY, ox: 框.x, oy: 框.y };
-    // 成员在按下那一刻定死 —— 拖的过程中框跟着动，再算会滑
-    const 员 = 框里成员(框).map(m => ({ el: m, 位: 元素的位(m), id: m.dataset.id }));
+    // 按住不动 = 单击，不该拖。走够 5px 才算拖（跟块那边的阈值一个道理）。
+    // 成员也等到这一刻才取 —— 按下的那一瞬间框还没动，这时候算出来的位才是真的。
+    let 员 = null;
+    const 探 = ev => {
+      if (员) return;
+      if (Math.abs(ev.clientX - 起.x) + Math.abs(ev.clientY - 起.y) < 5) return;
+      员 = 框里成员(框).map(m => ({ el: m, 位: 元素的位(m), id: m.dataset.id }));
+      el.classList.add('拖动中');
+    };
     const 移 = ev => {
+      探(ev);
       const z = 视.z || 1;
       const dx = (ev.clientX - 起.x) / z, dy = (ev.clientY - 起.y) / z;
       框.x = Math.round(起.ox + dx);
       框.y = Math.round(起.oy + dy);
       el.style.left = 框.x + 'px';
       el.style.top = 框.y + 'px';
-      for (const m of 员) {
+      for (const m of (员 || [])) {
         m.el.style.left = Math.round(m.位.x + dx) + 'px';
         m.el.style.top = Math.round(m.位.y + dy) + 'px';
         // ⚠️ 改字段，不要 set 一个新对象！
