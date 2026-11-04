@@ -30,19 +30,26 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     const b=e.closest('.blk'), i=e.closest('.实例框');
     return JSON.stringify({元素:e.tagName+'.'+(e.className||''), 块:b?b.dataset.id:null, 实例:i?i.dataset.id:null});})()`));
 
-  // ══ 快照：所有工程的块坐标，跑完还原 ══
-  const 快照 = JSON.parse(await 算(`(function(){ const 出=[];
-    for (const 名 of Object.keys(工程表)) { const 块=[];
-      (function 走(l){ for (const x of l||[]) { 块.push({id:x.id,x:x.x,y:x.y}); 走(x.子); for (const s of x.分支||[]) 走(s.子); } })(工程表[名].块们||[]);
-      出.push({名, 块}); }
-    return JSON.stringify(出); })()`));
-
   console.log('\n════ 1. 起手状态 ════');
   // 复位：这一项要验「打开就是网，块不摊在外面」，得先把手动留下的窗关掉。
   // 不然上一条用例、或者我自己调试时开的窗，会让块留在 DOM 里，
   // 报到「26 块摊在外面」—— 那不是产品错，是测试没把自己擦干净。
   await 算(`(function(){ if (窗.el) 关窗(); return 'ok'; })()`);
   await 等(400);
+
+  // ══ 快照：所有工程的块坐标，跑完还原 ══
+  // ⚠️ 必须拍在「复位」之后。拍在之前的话，关窗会重画一次、块位置跟着变，
+  //    结束时判定「没还原」就是假阳性 —— 其实是快照本身拍歪了。
+  const 快照 = JSON.parse(await 算(`(function(){ const 出=[];
+    for (const 名 of Object.keys(工程表)) { const 块=[];
+      (function 走(l){ for (const x of l||[]) { 块.push({id:x.id,x:x.x,y:x.y}); 走(x.子); for (const s of x.分支||[]) 走(s.子); } })(工程表[名].块们||[]);
+      出.push({名, 块}); }
+    return JSON.stringify(出); })()`));
+  // 实例框的位置也要拍 —— 第 7 步会拖框，不还原的话每跑一轮就往左漂一点，
+  // 漂到某个布局时曲线会撞上中间的框，于是「连线不穿过不相干的框」时绿时红。
+  // 那是我自己的测试在污染数据，不是产品问题。
+  const 框快照 = JSON.parse(await 算(`JSON.stringify([...网.位置].map(([id,v])=>({id, x:v.x, y:v.y})))`));
+
   const 开 = JSON.parse(await 算(`JSON.stringify({
     块:document.querySelectorAll('.blk').length, 实例框:document.querySelectorAll('.实例框').length,
     线:document.querySelectorAll('#线层 path').length, 网开:网.开, 窗外层:视.z,
@@ -54,30 +61,34 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   记('连线画出来了', 开.线 > 0, 开.线 + ' 条 path');
   记('生成 C# 不报错', 开.生成行 > 0, 开.生成行 + ' 行');
 
-  // 线不能穿过不相干的框。穿过去就是 edge ambiguity —— 线从框边上露出来，
-  // 看着像连到了那个框上（Ambiguity-Free Edge-Bundling 那篇的主题）。
-  // 采样曲线上的点，落进任何一个「既不是源也不是目标」的框内部就算穿。
+  // 线中途不能进任何框 —— 包括它自己连的那两个。
+  //
+  // ⚠️ 第一版把「源和目标」排除掉了，结果一条不漏地通过，而截图里明明有两条线
+  //    从 Cube 框里钻出来：那条线的**目标就是 Cube**，穿过 Cube 内部的那一段被当成
+  //    「正常接触」跳过了。所以这版改成：只允许在两端 24px 以内接触框，
+  //    中途进任何框都算。
   const 穿框 = JSON.parse(await 算(`(function(){
     const 框们=[...document.querySelectorAll('#网层 .实例框')]
       .filter(e=>!e.classList.contains('空头框') && !e.classList.contains('孤岛框'))
       .map(e=>({id:e.dataset.id, x:parseFloat(e.style.left)||0, y:parseFloat(e.style.top)||0,
                 w:e.offsetWidth, h:e.offsetHeight}));
-    let 条=0, 例='';
+    const 查=[];
     for(const p of document.querySelectorAll('#线层 path[data-自]')){
       const d=p.getAttribute('d')||'';
-      if(d.indexOf('l -8')>=0 || d.indexOf('l 8')>=0) continue;   // 箭头
-      const 长=p.getTotalLength(), 自=p.dataset.自, 到=p.dataset.到;
-      let 穿=false;
-      for(let t=0;t<=1&&!穿;t+=0.02){
-        const pt=p.getPointAtLength(长*t);
+      if(/^M [\\d.-]+ [\\d.-]+ l /.test(d)) continue;   // 箭头（M x y l ...）
+      const 长=p.getTotalLength();
+      if(!长) continue;
+      const 自=String(p.dataset.自||''), 到=String(p.dataset.到||'');
+      const 撞=new Set();
+      for(let 沿=24; 沿<=长-24; 沿+=Math.max(3, 长/240)){
+        const pt=p.getPointAtLength(沿);
         for(const b of 框们){
-          if(b.id===自||b.id===到) continue;
-          if(pt.x>b.x+2&&pt.x<b.x+b.w-2&&pt.y>b.y+2&&pt.y<b.y+b.h-2){穿=true;break;}
+          if(pt.x>b.x+2&&pt.x<b.x+b.w-2&&pt.y>b.y+2&&pt.y<b.y+b.h-2) 撞.add(b.id);
         }
       }
-      if(穿){条++; if(!例) 例=String(自).split('.').pop()+'→'+String(到).split('.').pop();}
+      if(撞.size) 查.push(自.split('.').pop()+'→'+到.split('.').pop()+' 进了 '+[...撞].map(s=>s.split('.').pop()).join(','));
     }
-    return JSON.stringify({条, 例});
+    return JSON.stringify({条:查.length, 例:查[0]||''});
   })()`));
   记('连线不穿过不相干的框', 穿框.条 === 0, 穿框.条 ? `${穿框.条} 条穿框，例如 ${穿框.例}` : '全部干净');
 
@@ -255,25 +266,55 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   // ══ 还原 ══
   await 算(`(function(){
     const 快照 = ${JSON.stringify(快照)};
+    const 按快照改 = (列表, 表) => {
+      (function 走(l){ for (const x of l||[]) {
+        const s = 表.get(String(x.id)); if (s) { x.x = s.x; x.y = s.y; }
+        走(x.子); for (const b of x.分支||[]) 走(b.子); } })(列表||[]);
+    };
     for (const 工 of 快照) {
       if (!工程表[工.名]) continue;
-      const 表 = new Map(工.块.map(o => [String(o.id), o]));
-      (function 走(l){ for (const x of l||[]) { const s = 表.get(String(x.id)); if (s) { x.x = s.x; x.y = s.y; }
-        走(x.子); for (const b of x.分支||[]) 走(b.子); } })(工程表[工.名].块们||[]);
+      按快照改(工程表[工.名].块们, new Map(工.块.map(o => [String(o.id), o])));
     }
-    存盘(); 重画(); 对准块();
+    // ⚠️ 还要改 根块们。切到工程时 修环() 会重建一份，根块们 和 工程表[...].块们
+    //    是**两个不同的对象**（实测改前者，后者纹丝不动）。存盘() 读的是 根块们，
+    //    只改 工程表 的话等于没改 —— 块每跑一轮就累加一次拖动量。
+    const 现工 = 快照.find(工 => 工.名 === 当前工程);
+    if (现工) 按快照改(根块们, new Map(现工.块.map(o => [String(o.id), o])));
+    存盘();
+    return 'ok';
+  })()`);
+  await 等(400);
+  // 实例框还原：连 DOM 一起摆回去，再画一次线、存一次布局
+  await 算(`(function(){
+    const 快照 = ${JSON.stringify(框快照)};
+    for (const o of 快照) 网.位置.set(o.id, { x: o.x, y: o.y });
+    for (const el of document.querySelectorAll('#网层 .实例框')) {
+      const 位 = 网.位置.get(el.dataset.id);
+      if (位) { el.style.left = 位.x + 'px'; el.style.top = 位.y + 'px'; }
+    }
+    画线(); 存布局();
     return 'ok';
   })()`);
   await 等(600);
-  const 还原后 = JSON.parse(await 算(`(function(){ let 坏=0, 最远=0;
-    for (const 名 of Object.keys(工程表)) (function 走(l){ for (const x of l||[]) {
-      // 阈值放宽到 6000：块的绝对坐标可以合法地很远（开窗时视野会用负偏移把内容搬进来），
-      // 真正要防的是「越拖越远停不下来」。看的是单块绝对距离，不是相对布局。
-      最远 = Math.max(最远, Math.abs(x.x), Math.abs(x.y));
-      if (Math.abs(x.x)>6000||Math.abs(x.y)>6000) 坏++;
-      走(x.子); for (const s of x.分支||[]) 走(s.子); } })(工程表[名].块们||[]);
-    return JSON.stringify({坏, 最远:Math.round(最远)}); })()`));
-  记('测试后数据已还原', 还原后.坏 === 0, `${还原后.坏} 个坐标越界（最远 ${还原后.最远}）`);
+  const 还原后 = JSON.parse(await 算(`(function(){
+    // 「还原」的判据是「跟开跑前的快照一致」，不是「坐标绝对值小」。
+    // 原来用 |x|>6000 判坏，可块本来就能合法地在几千的位置（开窗时视野用负偏移
+    // 把内容搬进来过），于是干净的数据也被判成没还原。
+    const 快照 = ${JSON.stringify(快照)};
+    let 偏 = 0, 例 = '';
+    for (const 工 of 快照) {
+      if (!工程表[工.名]) continue;
+      const 表 = new Map(工.块.map(o => [String(o.id), o]));
+      (function 走(l){ for (const x of l||[]) {
+        const s = 表.get(String(x.id));
+        if (s && (Math.abs(x.x - s.x) > 0.5 || Math.abs(x.y - s.y) > 0.5)) {
+          偏++;
+          if (!例) 例 = String(x.id) + ' ('+Math.round(s.x)+','+Math.round(s.y)+') → ('+Math.round(x.x)+','+Math.round(x.y)+')';
+        }
+        走(x.子); for (const b of x.分支||[]) 走(b.子); } })(工程表[工.名].块们||[]);
+    }
+    return JSON.stringify({偏, 例}); })()`));
+  记('测试后数据已还原', 还原后.偏 === 0, 还原后.偏 ? `${还原后.偏} 个块没回到原位，例如 ${还原后.例}` : '全部回到开跑前的坐标');
 
   const 过 = 结.filter(x => x.过).length, 总 = 结.length;
   console.log(`\n════ 合计 ${过}/${总} 通过 ════`);
