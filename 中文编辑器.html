@@ -4533,18 +4533,44 @@ function 竖段干净(x, 上, 下, 框位, 自id, 到id) {
   return true;
 }
 
-// 从 (x1,y1) 到 (x2,y2) 的一条正交折线。
+// ── 走线两种画法，可切 ───────────────────────────────────
+//
+// 曲线：Blender / Unreal / Unity Shader Graph 的默认形态（noodle）。
+//       控制点沿出口方向水平拉开，短距离收紧、长距离张开 ——
+//       ComfyUI 的 NKD Reroutes 把这个叫 elasticity。
+// 正交：电路板走线。Unreal 的 Electronic Nodes / Gridline Blueprints 那一路，
+//       卖点是「gets rid of the usual spaghetti mess」。
+//
+// 实测正交的难处：Slider(599-670) 和 Cube(526-631) 水平几乎重叠，中间还夹着 coin，
+// 竖段放哪儿都撞，于是被一路推到画布外再绕回来 —— 量出来宽 703 高 836，绕了大半张图。
+// 曲线不受这个约束，弯过去就行。所以默认用曲线。
+// 在控制台 `走线法='正交'; 画线()` 可以切回去比。
+let 走线法 = '曲线';
+
+function 曲线路(x1, y1, x2, y2) {
+  const 距 = Math.abs(x2 - x1);
+  const 伸 = Math.min(Math.max(距 * 0.5, 30), 180);
+  const 朝 = x2 >= x1 ? 1 : -1;
+  return `M ${x1} ${y1} C ${x1 + 朝 * 伸} ${y1}, ${x2 - 朝 * 伸} ${y2}, ${x2} ${y2}`;
+}
+
+function 选走线(x1, y1, x2, y2, 框位, 自id, 到id) {
+  if (走线法 === '正交') return 折线成路(正交点(x1, y1, x2, y2, 框位, 自id, 到id), 14);
+  return 曲线路(x1, y1, x2, y2);
+}
+
+// 从 (x1,y1) 到 (x2,y2) 的一条正交折线，返回**点列表**（不是 path 字符串）。
 // 中间竖段从正中往两边试，取第一个不穿过别的框的位置 —— 找不到就用正中。
 //
 // ⚠️ 两个方向都得能走。原来只会「源右 → 目标左」，碰上目标在左边就硬绕一个大回环
 //    （实测绕到画布顶部横跨半张图），丑而且根本跟不住。现在调用方按目标方向选出口边，
 //    这里只负责在两点之间找一条干净的竖段。
-function 正交路(x1, y1, x2, y2, 框位, 自id, 到id) {
+function 正交点(x1, y1, x2, y2, 框位, 自id, 到id) {
   const 左 = Math.min(x1, x2), 右 = Math.max(x1, x2);
   const 上 = Math.min(y1, y2), 下 = Math.max(y1, y2);
 
   // 两点横向几乎重合：没地方放竖段，先竖后横（Unreal「竖段侧移」的简化版）
-  if (右 - 左 < 28) return `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+  if (右 - 左 < 28) return [[x1, y1], [x1, y2], [x2, y2]];
 
   const 中 = (x1 + x2) / 2;
   let mx = 中;
@@ -4555,7 +4581,34 @@ function 正交路(x1, y1, x2, y2, 框位, 自id, 到id) {
       if (b < 右 - 14 && 竖段干净(b, 上, 下, 框位, 自id, 到id)) { mx = b; break; }
     }
   }
-  return `M ${x1} ${y1} L ${mx} ${y1} L ${mx} ${y2} L ${x2} ${y2}`;
+  return [[x1, y1], [mx, y1], [mx, y2], [x2, y2]];
+}
+
+// 把折线的拐角磨成圆弧。
+//
+// 为什么：直角走线看着像电路板上的生硬铜线，四个尖角并排就是"丑"的来源。
+// 真实 PCB 走线的转角是圆的。加圆角不改变走向 —— 该绕的框还是绕开了 ——
+// 但线条立刻从「硬折」变成「转弯」。
+// 半径取 min(角半径, 相邻两段长的一半)，短段不会被圆弧吃掉。
+function 折线成路(点们, 角半径) {
+  if (点们.length < 2) return '';
+  const 段长 = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const 数 = v => (Math.round(v * 10) / 10);
+  let d = `M ${数(点们[0][0])} ${数(点们[0][1])}`;
+  for (let i = 1; i < 点们.length - 1; i++) {
+    const p0 = 点们[i - 1], p1 = 点们[i], p2 = 点们[i + 1];
+    const l1 = 段长(p0, p1), l2 = 段长(p1, p2);
+    const rr = Math.min(角半径, l1 / 2, l2 / 2);
+    if (rr < 1) { d += ` L ${数(p1[0])} ${数(p1[1])}`; continue; }
+    const u1 = [(p1[0] - p0[0]) / (l1 || 1), (p1[1] - p0[1]) / (l1 || 1)];
+    const u2 = [(p2[0] - p1[0]) / (l2 || 1), (p2[1] - p1[1]) / (l2 || 1)];
+    const a = [p1[0] - u1[0] * rr, p1[1] - u1[1] * rr];
+    const b = [p1[0] + u2[0] * rr, p1[1] + u2[1] * rr];
+    d += ` L ${数(a[0])} ${数(a[1])} Q ${数(p1[0])} ${数(p1[1])} ${数(b[0])} ${数(b[1])}`;
+  }
+  const 末 = 点们[点们.length - 1];
+  d += ` L ${数(末[0])} ${数(末[1])}`;
+  return d;
 }
 
 // 悬停一个框：只留跟它有关的那几根线。
@@ -4651,7 +4704,7 @@ function 画线() {
       const y1 = Math.round(起 + i * 间距);
       const x2 = 往右 ? 的.x : 的.x + 的.w;
       const y2 = Math.round(的.y + 的.h / 2);
-      const d = 正交路(x1, y1, x2, y2, 框位, 实.id, 出口.到);
+      const d = 选走线(x1, y1, x2, y2, 框位, 实.id, 出口.到);
       const p = 画一条(d, '#7a6a3f', 1.2, 实.id, 出口.到);
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
       t.textContent = (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
@@ -4669,7 +4722,7 @@ function 画线() {
     const 往右 = (的.x + 的.w / 2) >= (源.x + 源.w / 2);
     const x1 = 往右 ? 源.x + 源.w : 源.x, y1 = 源.y + 实例头高 + 10;
     const x2 = 往右 ? 的.x : 的.x + 的.w, y2 = 的.y + 的.h / 2;
-    const d = 正交路(x1, y1, x2, y2, 框位, 线.自, 线.到);
+    const d = 选走线(x1, y1, x2, y2, 框位, 线.自, 线.到);
     const p = 画一条(d, '#6fb98d', 1.4, 线.自, 线.到, '6 4');
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
     t.textContent = '你指定的连接：' + (线.说明 || '');
