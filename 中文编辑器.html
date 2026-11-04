@@ -2161,8 +2161,10 @@ let 平移 = null;
   if (e.button !== 0) return;
   // 在窗户里按的，归窗户平移它自己的世界 —— 外层不许跟着动。
   // 这里不加的话，拖窗户内空白时整张网也在挪，看着就是「内外一起动」。
-  if (e.target.closest && e.target.closest('.窗户')) return;
-  if (e.target.closest('.blk') || e.target.closest('.palette')) return;
+  // Shift 拖 = 挪外层。所以 Shift 时就算按在窗户里，也归外层管，不让开。
+  if (!e.shiftKey && e.target.closest && e.target.closest('.窗户')) return;
+  if (!e.shiftKey && (e.target.closest('.blk') || e.target.closest('.palette'))) return;
+  if (e.shiftKey && e.target.closest && e.target.closest('.palette')) return;
   平移 = { sx: e.clientX, sy: e.clientY, ox: 视.x, oy: 视.y };
   舞台.classList.add('平移中');
 });
@@ -4330,6 +4332,9 @@ function 装窗缩放() {
   // 所以能走到这儿的，基本就是空白处。
   框.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+    // Shift 交给外层 —— 按住 Shift 拖，挪的是整张网，不是这扇窗户里的世界。
+    // 设计稿里内层第一句就是 if (e.shiftKey) return;
+    if (e.shiftKey) return;
     if (e.target.closest('.blk') || e.target.closest('input') || e.target.closest('textarea')) return;
     e.preventDefault();
     e.stopPropagation();

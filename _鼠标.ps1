@@ -96,8 +96,11 @@ switch ($动作) {
   }
   '拖' {
     $x1, $y1, $x2, $y2 = $数[0], $数[1], $数[2], $数[3]
+    # 第 5 个参数：1 = 按住 Shift 拖（用来验「Shift 拖 = 挪外层」）
+    $按Shift = ($数.Length -ge 5 -and $数[4] -eq 1)
     移到 $x1 $y1
     Start-Sleep -Milliseconds 100
+    if ($按Shift) { [鼠]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }
     [鼠]::mouse_event([鼠]::下, 0, 0, 0, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 80
     # 分 24 步走完 —— 一步跳到底的话浏览器的 pointermove 可能只收到一次，
@@ -110,7 +113,8 @@ switch ($动作) {
     }
     Start-Sleep -Milliseconds 120
     [鼠]::mouse_event([鼠]::上, 0, 0, 0, [IntPtr]::Zero)
-    Write-Output "拖 ($x1,$y1) → ($x2,$y2)"
+    if ($按Shift) { [鼠]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero) }
+    Write-Output "拖 ($x1,$y1) → ($x2,$y2) 上下$(if($按Shift){' +Shift'})"
   }
   '滚' {
     $x, $y, $次 = $数[0], $数[1], $数[2]
