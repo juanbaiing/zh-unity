@@ -389,7 +389,7 @@ namespace 图数据
             try
             {
                 using var 命 = 连.CreateCommand();
-                命.CommandText = "SELECT id, 标题, x, y, 宽, 高, 色, 收起 FROM 注释框";
+                命.CommandText = "SELECT id, 标题, x, y, 宽, 高, 色, 收起, 父 FROM 注释框";
                 using var 读 = 命.ExecuteReader();
                 while (读.Read())
                     注释框们.Add(new
@@ -400,6 +400,8 @@ namespace 图数据
                         宽 = 读.GetDouble(4), 高 = 读.GetDouble(5),
                         色 = 读.IsDBNull(6) ? "" : 读.GetString(6),
                         收起 = 读.GetInt32(7) != 0,
+                        // 父 = 上级框的 id；空 = 顶层。子框的 x/y 相对父框。
+                        父 = 读.IsDBNull(8) ? "" : 读.GetString(8),
                     });
             }
             catch { /* 老库还没这张表 —— 当作一个框都没有 */ }

@@ -92,7 +92,33 @@ namespace 数据层
                 命.CommandText = 条;
                 命.ExecuteNonQuery();
             }
+            补列(连, "注释框", "父", "TEXT");
             写元信息(连, "建库时间", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+
+        // CREATE TABLE IF NOT EXISTS 不会给**已经存在**的表加列 ——
+        // 老库里的 注释框 表没有 父 这一列，光改 schema.sql 是没用的。
+        // 这里按 PRAGMA table_info 查一遍，缺了才 ALTER。
+        //
+        // 为什么不用「试一次 ALTER，失败就吞掉」：那样分不清
+        // 「列已经有了」和「表根本没有 / 权限不对」，属于静默掩盖。
+        private static void 补列(SqliteConnection 连, string 表, string 列, string 类型)
+        {
+            using (var 查 = 连.CreateCommand())
+            {
+                查.CommandText = $"PRAGMA table_info({表})";
+                using var 读 = 查.ExecuteReader();
+                while (读.Read())
+                {
+                    // 第 2 列（index 1）是列名
+                    if (!读.IsDBNull(1) && 读.GetString(1).Equals(列, StringComparison.Ordinal)) return;
+                    if (!读.IsDBNull(1) && 读.GetString(1).Equals(列, StringComparison.OrdinalIgnoreCase)) return;
+                }
+            }
+            using var 改 = 连.CreateCommand();
+            改.CommandText = $"ALTER TABLE {表} ADD COLUMN {列} {类型}";
+            改.ExecuteNonQuery();
+            Console.WriteLine($"补列：{表}.{列} {类型}");
         }
 
         private static IEnumerable<string> 切语句(string sql)

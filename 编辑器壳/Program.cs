@@ -551,8 +551,8 @@ namespace ZhEditorShell
                                         using var 命 = 连.CreateCommand();
                                         命.Transaction = 务;
                                         命.CommandText =
-                                            "INSERT INTO 注释框(id, 标题, x, y, 宽, 高, 色, 收起) " +
-                                            "VALUES($id, $标, $x, $y, $宽, $高, $色, $收)";
+                                            "INSERT INTO 注释框(id, 标题, x, y, 宽, 高, 色, 收起, 父) " +
+                                            "VALUES($id, $标, $x, $y, $宽, $高, $色, $收, $父)";
                                         命.Parameters.AddWithValue("$id", 项.GetProperty("id").GetString() ?? "");
                                         命.Parameters.AddWithValue("$标", 项.TryGetProperty("标题", out var 标) ? 标.GetString() ?? "" : "");
                                         命.Parameters.AddWithValue("$x", 项.GetProperty("x").GetDouble());
@@ -561,6 +561,8 @@ namespace ZhEditorShell
                                         命.Parameters.AddWithValue("$高", 项.GetProperty("高").GetDouble());
                                         命.Parameters.AddWithValue("$色", 项.TryGetProperty("色", out var 色) ? 色.GetString() ?? "" : "");
                                         命.Parameters.AddWithValue("$收", 项.TryGetProperty("收起", out var 收) && 收.GetBoolean() ? 1 : 0);
+                                        // 父 = 上级框 id，空 = 顶层。老页面可能不带这个字段，兜底当顶层。
+                                        命.Parameters.AddWithValue("$父", 项.TryGetProperty("父", out var 父) ? 父.GetString() ?? "" : "");
                                         命.ExecuteNonQuery();
                                     }
                                     务.Commit();
