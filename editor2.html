@@ -837,6 +837,13 @@ document.addEventListener('pointerdown', e => {
   关说明();
 }, true);
 
+// Esc 关窗。框放大到占满屏幕之后，框头（含「← 返回」）会跑出视口 ——
+// 那时候按钮就在屏幕外面，点不着，人就卡在编辑器里出不来。
+// 退出口不能只挂在框头上，键盘得有一个。
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && 窗.el) { e.preventDefault(); 关窗(); return; }
+});
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { 关说明(); 关选项(); } });
 
 function 做按钮(文字, 提示, 处理, 额外类) {
@@ -2180,6 +2187,11 @@ function 画网(图) {
 function 窗口改了就重排() {
   const 比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
   for (const el of document.querySelectorAll('.实例框')) {
+    // ⚠️ 必须先把宽度放开再量高度。
+    //    不放开的话，宽度还是上一轮算的值，文字换行方式跟着宽度走，
+    //    量出来的高度就是旧形状下的高度 —— 一路叠下去框会越来越歪
+    //    （实测变成 293×479 = 0.61 的竖条）。
+    el.style.width = '';
     const 高 = el.offsetHeight;
     if (!高) continue;
     el.style.width = Math.round(Math.max(180, 高 * 比)) + 'px';
@@ -2265,17 +2277,14 @@ function 建实例框(实) {
   // 长宽比 = 屏幕比例。先让内容把高度撑出来，再反过来定宽：宽 = 高 × 比。
   // 这样脚本多的框自动宽、少的自动窄，形状始终跟着屏幕走；
   // 放大到占满屏幕时，里面那块画布就是一块正常的横的编辑区，不是方的。
-  const 屏比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
-  requestAnimationFrame(() => {
-    if (!el.isConnected) return;
-    const 高 = el.offsetHeight;
-    const 宽 = Math.round(Math.max(180, 高 * 屏比));
-    el.style.width = 宽 + 'px';
-  });
+  requestAnimationFrame(() => { if (el.isConnected) 窗口改了就重排(); });
 
   // 拖标题条移动整个框。用 pointer 事件，坐标除以视.z —— 和块用的是同一套换算。
   头.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+    // ⚠️ 点按钮不参与拖动。头的 pointerdown 会 preventDefault，
+    //    把后面那次 click 掐掉 —— 于是「← 返回」「✎ 编辑」看着点不动。
+    if (e.target.closest('.编钮')) return;
     e.preventDefault();
     e.stopPropagation();
     头.setPointerCapture(e.pointerId);
@@ -2401,6 +2410,7 @@ function 关窗() {
   }
   for (const el of (窗.头标 || [])) el.remove();
   if (窗.头钮) 窗.头钮.style.display = '';
+  requestAnimationFrame(窗口改了就重排);
   当前画布 = null;
   窗.el = null; 窗.内 = null; 窗.体 = null;
   窗.原内容 = null; 窗.头标 = null; 窗.头钮 = null;
@@ -2410,10 +2420,8 @@ function 关窗() {
 function 开窗(实例el, 脚本名) {
   if (窗.脚本 === 脚本名) { 关窗(); return; }
 
-  if (!框够大(实例el)) {
-    网提示('把这个框放大到占满屏幕，再点它内部的编辑');
-    return;
-  }
+  // 不再硬拦「框够不够大」。点了就开 —— 框小画布就小，用户自己会放大。
+  // 拦着的话点下去什么都不发生，看着就是坏了。
   if (!工程表[脚本名]) {
     网提示('这个脚本还没有块树：' + 脚本名);
     return;
@@ -2462,6 +2470,7 @@ function 开窗(实例el, 脚本名) {
   当前画布 = 内;
   切到工程(脚本名);
   布局(根块们);
+  requestAnimationFrame(窗口改了就重排);
 
   // 先缩到整棵树装得下，用户再自己滚
   requestAnimationFrame(() => {
