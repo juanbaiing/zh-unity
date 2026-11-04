@@ -79,3 +79,7 @@ zhbridge-check/obj/
 !_窗跟框.js
 !_框内编辑器.js
 !_框屏幕比例.js
+
+# .NET 构建产物（里面会写进本机绝对路径）
+demo/bin/
+demo/obj/
