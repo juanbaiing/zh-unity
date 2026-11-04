@@ -290,6 +290,24 @@
   .脚本口 i{width:6px;height:6px;border-radius:50%;border:1px solid #7a6a3f;display:block}
   .实例脚{padding:4px 12px;color:var(--字4);font-size:var(--字标);
     border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* 孤岛脚本：写好了但场景里没有物体挂它。红色边框 —— 它不会跑，
+     但也不会被调用，是段死代码，得让人看见。 */
+  .孤岛框{border-color:var(--bad)!important;border-style:dashed!important;
+    background:color-mix(in srgb, var(--bad) 8%, var(--panel))}
+  .孤岛框 .实例名{color:var(--bad)}
+  /* 左边栏的脚本索引 */
+  #脚本索引{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;
+    max-height:42%;overflow:auto}
+  .索引头{font-size:var(--字标);color:var(--字4);padding:0 4px 4px;
+    display:flex;justify-content:space-between}
+  .索引项{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:4px;
+    font-size:var(--字标);color:#6f8aa3;cursor:pointer;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .索引项:hover{background:var(--脚);color:var(--字1)}
+  .索引项 .挂{color:var(--字4);font-size:10px;margin-left:auto;
+    overflow:hidden;text-overflow:ellipsis}
+  .索引项.孤{color:var(--bad)}
+  .索引空{font-size:var(--字标);color:var(--字4);padding:2px 6px}
   .网提示{position:absolute;left:40px;top:12px;padding:8px 12px;border-radius:4px;
     background:var(--panel);color:var(--dim);font-size:var(--字正文);
     border:1px solid var(--line);z-index:50;pointer-events:none}
@@ -408,6 +426,7 @@
 
 <main>
   <aside class="palette">
+    <div id="脚本索引"></div>
     <h2>点一下加块</h2>
     <div id="palette"></div>
   </aside>
@@ -3952,7 +3971,10 @@ function 画网(图) {
   }
 
   网.层.textContent = '';
+  网.孤岛们 = Array.isArray(图.孤岛们) ? 图.孤岛们 : [];
   for (const 实 of 网.实例们) 建实例框(实);
+  for (const 孤 of 网.孤岛们) 建孤岛框(孤);
+  画脚本索引();
   // 窗口尺寸可能变过，重算一遍长宽比
   窗口改了就重排();
   画线();
@@ -3978,6 +4000,111 @@ function 窗口改了就重排() {
     if (!高) continue;
     el.style.width = Math.round(Math.max(180, 高 * 比)) + 'px';
   }
+}
+
+// 孤岛：没有实例框的脚本，单独摆一块，红框
+function 建孤岛框(孤) {
+  if (!网.位置.has(孤.id)) 网.位置.set(孤.id, { x: 孤.x || 0, y: 孤.y || 0 });
+  const 位 = 网.位置.get(孤.id);
+  const el = document.createElement('div');
+  el.className = '实例框 孤岛框';
+  el.dataset.id = 孤.id;
+  el.style.left = 位.x + 'px';
+  el.style.top = 位.y + 'px';
+  el.style.width = '220px';
+  el.style.height = '80px';
+
+  const 头 = document.createElement('div');
+  头.className = '实例头';
+  const 名 = document.createElement('span');
+  名.className = '实例名';
+  名.textContent = 孤.名 || 孤.id;
+  const 签 = document.createElement('span');
+  签.className = '实例签';
+  签.textContent = '孤岛';
+  头.appendChild(名); 头.appendChild(签);
+  el.appendChild(头);
+
+  const 体 = document.createElement('div');
+  体.className = '实例体';
+  const 说 = document.createElement('div');
+  说.className = '实例脚';
+  说.style.borderTop = '0';
+  说.textContent = 孤.原因 || '场景里没有物体挂这个脚本';
+  体.appendChild(说);
+  el.appendChild(体);
+
+  头.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('.编钮')) return;
+    e.preventDefault();
+    const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
+    const 移 = ev => {
+      位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
+      位.y = Math.round(起.oy + (ev.clientY - 起.y) / (视.z || 1));
+      el.style.left = 位.x + 'px';
+      el.style.top = 位.y + 'px';
+      画线();
+    };
+    const 停 = () => {
+      头.removeEventListener('pointermove', 移);
+      头.removeEventListener('pointerup', 停);
+      存布局();
+    };
+    头.addEventListener('pointermove', 移);
+    头.addEventListener('pointerup', 停);
+  });
+
+  网.层.appendChild(el);
+}
+
+// 左边栏的「所有脚本」索引。点一下把视野对准那个框 ——
+// 11 个脚本散在画布上，靠眼睛找太费劲。
+function 画脚本索引() {
+  const 盒 = document.getElementById('脚本索引');
+  if (!盒) return;
+  盒.textContent = '';
+  const 头 = document.createElement('div');
+  头.className = '索引头';
+  const 数 = (网.实例们.reduce((n, 实) => n + (实.脚本 || []).length, 0)) + (网.孤岛们 || []).length;
+  头.innerHTML = '<span>所有脚本</span><span>' + 数 + '</span>';
+  盒.appendChild(头);
+  if (!数) {
+    const 空 = document.createElement('div');
+    空.className = '索引空';
+    空.textContent = '还没有脚本';
+    盒.appendChild(空);
+    return;
+  }
+  const 加 = (名, 挂谁, 孤, id) => {
+    const 项 = document.createElement('div');
+    项.className = '索引项' + (孤 ? ' 孤' : '');
+    项.title = 孤 ? (名 + '（无人挂载）') : (名 + ' → ' + 挂谁);
+    const 字 = document.createElement('span');
+    字.textContent = 名;
+    项.appendChild(字);
+    const 尾 = document.createElement('span');
+    尾.className = '挂';
+    尾.textContent = 孤 ? '✗ 无人挂载' : 挂谁;
+    项.appendChild(尾);
+    项.addEventListener('click', () => 对准目标(id));
+    盒.appendChild(项);
+  };
+  for (const 实 of 网.实例们) for (const sc of 实.脚本 || []) 加(sc.名, 实.名, false, 实.id);
+  for (const 孤 of 网.孤岛们 || []) 加(孤.名, '', true, 孤.id);
+}
+
+// 把视野挪到某个框上，保持当前缩放
+function 对准目标(id) {
+  const el = 网.层 && 网.层.querySelector('.实例框[data-id="' + CSS.escape(id) + '"]');
+  if (!el) return;
+  const 台 = 舞台.getBoundingClientRect();
+  const z = 视.z || 1;
+  视.x = 台.left + 40 - (parseFloat(el.style.left) || 0) * z;
+  视.y = 台.top + 40 - (parseFloat(el.style.top) || 0) * z;
+  应用视();
+  // 闪一下，让人知道对到哪了
+  el.animate([{ outline: '2px solid #7a6a3f' }, { outline: '2px solid transparent' }],
+    { duration: 900 });
 }
 
 function 建实例框(实) {

@@ -274,10 +274,37 @@ namespace 图数据
                 foreach (var 目标 in 目标们) 加线(源, 目标, e.种类, e.原文);
             }
 
+            // 孤岛脚本：写好了、编得过，但场景里没有任何物体挂它。
+            // 这种脚本在画面上原本会直接消失 —— 你看不见它们，也就不知道
+            // 自己写了段死代码。单独给出来，前端会摆到空地上标红。
+            var 孤岛们 = new List<object>();
+            {
+                var 已挂 = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var e in 边们.Where(e => e.种类 == "实例化")) 已挂.Add(e.到);
+                var 序 = 0;
+                foreach (var n in 节点列表.Where(n => n.类型 == "脚本").OrderBy(n => n.id, StringComparer.Ordinal))
+                {
+                    if (已挂.Contains(n.id)) continue;
+                    var 短 = (n.短 ?? n.id);
+                    短 = 短.Contains('.') ? 短.Split('.').Last() : 短;
+                    // 摆在网格最后几列的右边，不跟实例框抢地方
+                    孤岛们.Add(new
+                    {
+                        id = n.id,
+                        名 = 短,
+                        原因 = "场景里没有物体挂这个脚本",
+                        x = 90 + (按物.Count % 列数) * 格宽 + 格宽,
+                        y = 130 + 逐行高.Sum() + 格缝 + 序 * 180,
+                    });
+                    序++;
+                }
+            }
+
             return (new
             {
                 实例们 = 实例们.ToArray(),
                 空头们 = Array.Empty<object>(),
+                孤岛们 = 孤岛们.ToArray(),
                 线 = 线们.ToArray(),
             }, 实例们.Count);
         }
