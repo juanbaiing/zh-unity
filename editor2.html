@@ -580,6 +580,8 @@
 <script src="unity-words.js"></script>
 <script src="zh2unity.js"></script>
 <script src="blocks.js"></script>
+<!-- 线绕框：libavoided-js（libavoid 的 JS 移植）。由 _做libavoid.js 生成，别手改 -->
+<script src="libavoided.js"></script>
 <script src="blocks2.js"></script>
 <script>
 const { 块定义 } = window.Blocks;
@@ -2664,6 +2666,7 @@ function 建注释框(框) {
       网.框层.appendChild(el);
       提起过 = true;
       el.classList.add('拖动中');
+      网.拖中 = true;
     };
     const 移 = ev => {
       探(ev);
@@ -2692,6 +2695,9 @@ function 建注释框(框) {
       document.removeEventListener('pointermove', 移);
       document.removeEventListener('pointerup', 停);
       归位(框);
+      // 拖动结束：把线按完整算法重算一遍（拖动中用的是降级折线）
+      网.拖中 = false;
+      画线();
       存布局(); 存注释框();
     };
     document.addEventListener('pointermove', 移);
@@ -3562,6 +3568,8 @@ function 建实例框(实) {
     e.stopPropagation();
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
     const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
+    // 拖动期间不跑全图路由（一次 130ms 会卡成幻灯片），松手再精确算一次
+    网.拖中 = true;
     const 移 = ev => {
       位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
       位.y = Math.round(起.oy + (ev.clientY - 起.y) / (视.z || 1));
@@ -3572,6 +3580,8 @@ function 建实例框(实) {
     const 停 = () => {
       el.removeEventListener('pointermove', 移);
       el.removeEventListener('pointerup', 停);
+      网.拖中 = false;
+      画线();
       存布局();
     };
     el.addEventListener('pointermove', 移);
@@ -3650,6 +3660,33 @@ function 曲线路(x1, y1, x2, y2) {
   return `M ${x1} ${y1} C ${x1 + 朝 * 伸} ${y1}, ${x2 - 朝 * 伸} ${y2}, ${x2} ${y2}`;
 }
 
+// 穿点成曲线（Catmull-Rom 转三次贝塞尔）。
+//
+// libavoid 给的是直角的拐点，照着连就是电路板。这里把这些拐点当**路标**，
+// 曲线从它们中间圆滑穿过 —— 用 Unreal / Blender 那种 noodle 的手感。
+//
+// ⚠️ 圆滑会「切角」：两条正交段相交的那个直角，曲线会抄近道切过去。
+//    切掉多少取决于张力。默认 1/6（Catmull-Rom 的标准值）在转角处大约切
+//    掉拐点两侧各 1/6 段长；libavoid 的 obstacleMargin 是 10px，够兜。
+function 样条成路(点们) {
+  if (!点们 || 点们.length < 2) return '';
+  const 数 = v => Math.round(v * 10) / 10;
+  if (点们.length === 2) {
+    return `M ${数(点们[0][0])} ${数(点们[0][1])} L ${数(点们[1][0])} ${数(点们[1][1])}`;
+  }
+  let d = `M ${数(点们[0][0])} ${数(点们[0][1])}`;
+  for (let i = 0; i < 点们.length - 1; i++) {
+    const p0 = 点们[i - 1] || 点们[i];
+    const p1 = 点们[i];
+    const p2 = 点们[i + 1];
+    const p3 = 点们[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${数(c1x)} ${数(c1y)}, ${数(c2x)} ${数(c2y)}, ${数(p2[0])} ${数(p2[1])}`;
+  }
+  return d;
+}
+
 // 竖着连（源在上、目标在下，或反过来）：控制点沿竖直方向拉开。
 function 曲线路竖(x1, y1, x2, y2) {
   const 距 = Math.abs(y2 - y1);
@@ -3667,36 +3704,82 @@ function 选走线(x1, y1, x2, y2, 框位, 自id, 到id, 竖) {
     return 折线成路(正交点(x1, y1, x2, y2, 框位, 自id, 到id), 14);
   }
 
-  // ── 曲线 + 只在该避的时候才避 ──
+  // ── 曲线 + 该避的时候才避 ──
   //
   // 曲线好看（短距离就该是软的），但它**一点避让都没有**：中间横着个框，
-  // 它就从框里穿过去。实测 Coin→Cube 那条钻进 Cube 内部走了一大段才出来，
-  // 看着像「连到了 Cube 上」—— 学术里叫 edge ambiguity
+  // 它就从框里穿过去。学术里叫 edge ambiguity
   // （Ambiguity-Free Edge-Bundling, TVCG：线压在不相关节点上会让人误判连接关系）。
   //
   // 所以不是把曲线全改成折线，而是：
-  //   1. 先按曲线密采样，一个不相干的框都不撞 → 就是它，原样返回
-  //   2. 撞了 → 拿撞到的那些框当障碍，生成「上/下/左/右」四种绕法
-  //   3. 四种都密采样评分（穿框数 > 长度），选最好的，拐角磨圆
-  // 绝大多数短线还是曲线，只有真被挡住的那几条会变成绕行。
+  //   1. 先按曲线密采样 —— 连**自己的框**算进去之后罚分都是 0 → 就是它，原样返回
+  //   2. 罚分了 → 拿穿过的那些框当障碍，生成「上/下/左/右」四种绕法
+  //   3. 四种都密采样算罚分+长度，选最好的，拐角磨圆
+  //
+  // ⚠️ 这里踩过一次：第一版判「撞没撞」时把源框和目标框整个排除了，
+  //    理由是「口长在框里，出去必然穿一小段」。这个豁免太宽 ——
+  //    从边上出去 20px 和横穿 300px 被当成了同一件事，
+  //    于是 enemy→Cube 那八条线横穿 enemy 整个框，判据说「全部干净」。
+  //    改成量**长度**（穿账），超过 框内可忍 才罚。
   const 曲线点 = 密采样(曲线采样(x1, y1, x2, y2, 竖));
-  const 曲线撞 = 撞了谁(曲线点, 框位, 自id, 到id);
-  if (!曲线撞.size) return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
+  if (穿框罚分(曲线点, 框位, 自id, 到id) === 0) return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
 
-  const 障碍 = [...曲线撞].map(id => 框位.get(id)).filter(Boolean);
+  // 障碍 = 这条曲线真穿过的框（含自己的框 —— 它也可能正是被穿的那一个）
+  const 障碍 = [...穿账(曲线点, 框位).keys()].map(id => 框位.get(id)).filter(Boolean);
   let 最好 = null, 最好分 = Infinity;
   for (const 点们 of 绕行候选(x1, y1, x2, y2, 障碍, 竖)) {
     const 密 = 密采样(点们);
-    const 分 = 撞了谁(密, 框位, 自id, 到id).size * 10000 + 点列长度(密);
+    const 分 = 穿框罚分(密, 框位, 自id, 到id) + 点列长度(密);
     if (分 < 最好分) { 最好分 = 分; 最好 = 点们; }
   }
   // 四种都还穿的话，也是「穿得最少的那条」比原曲线强，照样用
   return 最好 ? 折线成路(最好, 14) : (竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2));
 }
 
-// ── 避让要用的小工具 ────────────────────────────────────
+// 同上，但把分数也带出来 —— 调用方要用它挑「从哪条边出去最好」。
+//
+// 为什么要挑：出/入框方向不能靠「取最近的那条边」猜。
+// Coin(614~794) 与 Cube(734~1027) 水平重叠，Coin 的右边界 794 正好**落在 Cube 里面**，
+// 那时「最近的边」恰恰是最差的边 —— 线一出去就已经在 Cube 肚子里了。
+// 所以把几种出入口组合都算一遍，用分数挑。
+function 选走线评分(x1, y1, x2, y2, 框位, 自id, 到id, 竖) {
+  const 首点 = 密采样(曲线采样(x1, y1, x2, y2, 竖));
+  const 首罚 = 穿框罚分(首点, 框位, 自id, 到id);
+  if (首罚 === 0) {
+    return { d: 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2), 分: 点列长度(首点), 罚: 0 };
+  }
+  const 障碍 = [...穿账(首点, 框位).keys()].map(id => 框位.get(id)).filter(Boolean);
+  let 最好点 = null, 最好罚 = Infinity, 最好长 = 0;
+  for (const 点们 of 绕行候选(x1, y1, x2, y2, 障碍, 竖)) {
+    const 密 = 密采样(点们);
+    const 罚 = 穿框罚分(密, 框位, 自id, 到id);
+    if (罚 < 最好罚) { 最好罚 = 罚; 最好点 = 点们; 最好长 = 点列长度(密); }
+  }
+  if (最好点) return { d: 折线成路(最好点, 14), 分: 最好罚 + 最好长, 罚: 最好罚 };
+  return { d: 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2), 分: Infinity, 罚: Infinity };
+}
 
-const 避让边距 = 16;
+// 一个点在框里的哪条边最近 —— 线从口出去时走这条，别横穿自己的框。
+//
+// ⚠️ 原来的方向判断是「目标在左就往左出」，完全不看口本身在框里的哪边。
+//    实测 enemy 那个口的 x=1850、框是 1555~1905：口本来就在框的右侧，
+//    可目标 Cube 在左边，于是线从口往左走，**横穿 enemy 整个框 295px** 才出去。
+//    截图里那束「从框里面长出来横着穿过去」的线就是这么来的。
+//    正确的出口是离口最近的那条边 —— 那样框内的那段才最短。
+function 最近边(点, 框) {
+  const 到左 = 点.x - 框.x, 到右 = 框.x + 框.w - 点.x;
+  const 到上 = 点.y - 框.y, 到下 = 框.y + 框.h - 点.y;
+  const 最小 = Math.min(到左, 到右, 到上, 到下);
+  if (最小 === 到左) return { x: 框.x, y: 点.y, 边: '左', 距: 到左 };
+  if (最小 === 到右) return { x: 框.x + 框.w, y: 点.y, 边: '右', 距: 到右 };
+  if (最小 === 到上) return { x: 点.x, y: 框.y, 边: '上', 距: 到上 };
+  return { x: 点.x, y: 框.y + 框.h, 边: '下', 距: 到下 };
+}
+
+// 框内那一段允许多长。口本来就长在框里，出去必然要走一小段 —— 那是它该走的路。
+// 超过这个数就说明它在框里横穿了，得改从别的边走。
+const 框内可忍 = 70;
+
+
 
 // 三次贝塞尔取一个点
 function 贝塞尔(x1, y1, c1x, c1y, c2x, c2y, x2, y2, t) {
@@ -3740,16 +3823,50 @@ function 密采样(点们, 步 = 4) {
 
 // 这条点列穿过了哪些**不相干**的框。
 // 源框和目标框排除 —— 线落在「脚本行」上，行在框内部，从框边进到那一行
-// 必然穿一小段自己的框，那是它该走的路（跟 _全测.js 里那条判据同一个口径）。
-function 撞了谁(点们, 框位, 自id, 到id) {
-  const 撞 = new Set();
+// 这条点列在每个框里各走了多长。
+//
+// ⚠️ 不能只判「碰没碰到」：源框和目标框是必然要碰的（口就长在框里），
+//    但「从边上进来 20px」和「横穿 300px」完全是两回事 —— 前者是它该走的路，
+//    后者就是使用者截图里骂的那件事。所以这里量的是**长度**，不是布尔值。
+const 避让步长 = 4;
+
+function 穿账(点们, 框位) {
+  const 账 = new Map();
+  for (const [x, y] of 点们) {
+    for (const [id, b] of 框位) {
+      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2)
+        账.set(id, (账.get(id) || 0) + 避让步长);
+    }
+  }
+  return 账;
+}
+
+// 穿框罚分：不相干的框一点都不能进（每 px 罚 1）；
+// 源框和目标框允许「出/入的那一小段」，超了才罚。
+// 乘 200 是为了让它**压过长度**：宁可绕远，也别横穿（Yeh 2009 DD-1 的优先级：
+// collision avoidance > flow direction > crossing > bends > length）。
+function 穿框罚分(点们, 框位, 自id, 到id) {
+  const 账 = 穿账(点们, 框位);
+  let 罚 = 0;
+  for (const [id, 米] of 账) {
+    const 容忍 = (id === 自id || id === 到id) ? 框内可忍 : 0;
+    if (米 > 容忍) 罚 += (米 - 容忍) * 200;
+  }
+  return 罚;
+}
+
+const 避让边距 = 16;
+
+// 一条点列有没有钻进**第三者的**框里（源框、目标框不算 —— 口就长在它们里面）。
+// 布尔 + 早停：一碰到就返回，不比「算了多少 px」那种贵。
+function 撞了第三框(点们, 框位, 自id, 到id) {
   for (const [x, y] of 点们) {
     for (const [id, b] of 框位) {
       if (id === 自id || id === 到id) continue;
-      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) 撞.add(id);
+      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) return true;
     }
   }
-  return 撞;
+  return false;
 }
 
 function 点列长度(点们) {
@@ -3758,10 +3875,10 @@ function 点列长度(点们) {
   return 长;
 }
 
-// 四种绕法：从障碍的上方 / 下方 / 左方 / 右方兜过去。
+// 几种绕法：从障碍的上方 / 下方 / 左方 / 右方兜过去。
 //
-// 只用**真撞到的那些框**算边界，不是全图 —— 拿全图包围盒会绕出去半张画布
-// （正交那版的实测教训：量出来宽 703 高 836）。四个都生成，交给调用方评分。
+// 只用**真挡路的那些框**算边界，不是全图 —— 拿全图包围盒会绕出去半张画布
+// （正交那版的实测教训：量出来宽 703 高 836）。全都生成，交给调用方按罚分+长度选。
 function 绕行候选(x1, y1, x2, y2, 障碍, 竖) {
   const 出 = [];
   if (!障碍 || !障碍.length) return 出;
@@ -3772,7 +3889,7 @@ function 绕行候选(x1, y1, x2, y2, 障碍, 竖) {
   }
   上 -= 避让边距; 下 += 避让边距; 左 -= 避让边距; 右 += 避让边距;
 
-  // 上下兜
+  // 上下兜（两端各自先竖直出去，再横向走）
   出.push([[x1, y1], [x1, 上], [x2, 上], [x2, y2]]);
   出.push([[x1, y1], [x1, 下], [x2, 下], [x2, y2]]);
   // 左右兜
@@ -3924,10 +4041,19 @@ function 画线() {
              中x: (r.left + r.width / 2 - 世界r.left) / z };
   };
 
+  // ══ 先收齐所有边，**一次**算路 ══
+  //
+  // 为什么不能一条一条算：绕障之外还有一件更要紧的事 —— **平行线不许重合**。
+  // 两条线并排走同一段时，读者分不出它们各自从哪来。
+  // 这件事只有「全图一起算」才能做（libavoid 的 nudge / 通道分离）。
+  // 我之前是每条线各算各的，四选一兜法，出来就是楼梯，所以看着丑。
+  //
+  // 端点推到**框边界**上：libavoid 的端点落进障碍里会直接退化成一刀直线（实测过）。
+  // 框里那一小段（行↔框边）留下来当 stub，单独画。
+  const 边们 = [];
   for (const 实 of 网.实例们) {
     const 源 = 框位.get(实.id);
     if (!源) continue;
-    // 每个出口记住它属于哪个脚本的第几个口 —— 那是线的落点
     const 出 = [];
     for (const s of 实.脚本 || [])
       for (let k = 0; k < (s.出口 || []).length; k++) {
@@ -3936,53 +4062,120 @@ function 画线() {
         if (!框位.has(出口.到)) continue;
         出.push({ s, k, 出口 });
       }
-    if (!出.length) continue;
-
-    for (let i = 0; i < 出.length; i++) {
-      const { s, k, 出口 } = 出[i];
+    for (const { s, k, 出口 } of 出) {
       const 的 = 框位.get(出口.到);
-
-      // 源点：这个脚本那一行右边第 k 个圆点。
-      // 找得到就用它 —— 这样箭头扎在哪一行，就是哪个脚本在伸手。
       const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || '').replace(/\[\d+\]$/, ''));
       const 源点们 = 源行 ? 源行.querySelectorAll('.脚本口 i') : null;
       const 源点 = 源点们 && 源点们[k] ? 源点们[k] : (源行 || null);
-
-      // 终点：目标框里挂着「到类型」那一行的左边。找不到这一行就不连线 ——
-      // 那种出口连的是 Unity 内置组件（Rigidbody / Renderer…），不是用户脚本，
-      // 交给下面的「组件空头」处理。
       const 目标行 = 行表.get(出口.到 + '\u0001' + String(出口.到类型 || ''));
-      if (!目标行) continue;
+      if (!目标行) continue;      // 连的是 Unity 内置组件，交给下面的组件口
 
       const a = 源点 ? 换算(源点) : null;
       const b = 换算(目标行);
       const 连 = 连哪边(源, 的);
-      // 方向要用**端点**算，不能用框算。
-      // 用框算得出「往右」，但起点取的是那一行的左边、终点在右边时，
-      // 曲线的控制点会朝右伸 —— 正好伸进自己框里，线从框内部穿出去（实测 Cube→enemy）。
-      const 往右 = a ? (b.中x >= a.中x) : 连.往右;
-      let x1, y1, x2, y2, 朝;
 
-      if (连.竖) {
-        x1 = a ? a.中x : Math.round(源.x + 源.w * ((i + 1) / (出.length + 1)));
-        y1 = a ? (连.往下 ? a.下 : a.上) : (连.往下 ? 源.y + 源.h : 源.y);
-        x2 = b.中x;
-        y2 = 连.往下 ? b.上 : b.下;
-        朝 = 连.往下 ? '下' : '上';
-      } else {
-        x1 = a ? (往右 ? a.右 : a.左) : 连.x1;
-        y1 = a ? a.中y : Math.round(源.y + 源.h / 2);
-        x2 = 往右 ? b.左 : b.右;
-        y2 = b.中y;
-        朝 = 往右 ? '右' : '左';
-      }
-      const d = 选走线(x1, y1, x2, y2, 框位, 实.id, 出口.到, 连.竖);
-      const p = 画一条(d, '#7a6a3f', 1.2, 实.id, 出口.到);
-      const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      t.textContent = (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
-      p.appendChild(t);
-      画箭头(x2, y2, '#7a6a3f', 实.id, 出口.到, 朝);
+      // 端点就放在**口上 / 目标行上**，不推到框边界。
+      //
+      // 试过推到边界（那样看起来更"干净"），结果绕成迷宫：
+      // enemy 的八个口都在框的右侧，目标 Cube 在左边，从「最近的边」出去之后
+      // 得横跨整张图才能绕到左边 —— 一圈一圈像迷宫，还更慢。
+      // 现在把源框和目标框从障碍里拿掉，线从口直接出发，只绕**第三个框**。
+      // 这正是 Unreal Blueprint / Blender 的做法：noodle 从 pin 长出来，穿过自己那个节点。
+      const 源心 = a ? { x: a.中x, y: a.中y } : { x: 源.x + 源.w / 2, y: 源.y + 源.h / 2 };
+      const 端心 = { x: b.中x, y: b.中y };
+      const 入边 = 最近边(端心, 的);
+
+      边们.push({
+        id: 实.id + '\u0002' + 出口.到 + '\u0002' + (s.名 || '') + '\u0002' + k,
+        自: 实.id, 到: 出口.到,
+        题: (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || ''),
+        源点: 源心, 终点: 端心,
+        朝: 入边.边 === '左' ? '左' : (入边.边 === '右' ? '右' : (入边.边 === '上' ? '上' : '下')),
+      });
     }
+  }
+
+  let 路由 = null;
+  // 拖动中不算全图路由 —— libavoid 一次要 130ms（32 条边 26 个障碍），
+  // 每帧调一次就是「拖着拖着卡成幻灯片」。拖动时先用直角折顶着，
+  // 松手（pointerup）会再画一次，那一次走完整算法。
+  // 这是编辑器里的常规做法：拖动降级，静止精确。
+  const 可算 = 边们.length && window.libavoided && !网.拖中;
+  if (可算) {
+    // 障碍 = 别的框。源框和目标框不算 —— 口就长在它们里面，不让穿等于自断起终点。
+    const 站边 = new Set(边们.flatMap(e => [e.自, e.到]));
+    try {
+      路由 = window.libavoided.routeEdges({
+        obstacles: [...框位].filter(([id]) => !站边.has(id))
+          .map(([id, b]) => ({ id, x: b.x, y: b.y, width: b.w, height: b.h })),
+        edges: 边们.map(e => ({ id: e.id, sourcePoint: e.源点, targetPoint: e.终点 })),
+      }, {
+        // 这些数字就是「好不好看」本身。
+        // ⚠️ 画法从直角折线改成曲线之后，bendPenalty 必须跟着降 ——
+        //    直角折线上每个拐弯都是一个刺眼的折点，罚得重是对的；
+        //    曲线拐弯本来就顺，再罚重它就会为了少拐一次而绕出去一大圈。
+        //    （实测 320 → 出图是满屏大回环）
+        obstacleMargin: 8,
+        edgeSpacing: 5,
+        bendPenalty: 70,
+        crossingPenalty: 60,
+        lengthPenalty: 1,
+      });
+    } catch (错) {
+      路由 = null;
+      console.warn('libavoid 走线失败，退回直连：', 错 && 错.message);
+    }
+  }
+  const 路表 = new Map();
+  if (路由 && Array.isArray(路由.edges)) {
+    for (const e of 路由.edges) {
+      const sec = e.sections && e.sections[0];
+      if (!sec) continue;
+      路表.set(e.id, [sec.startPoint, ...(sec.bendPoints || []), sec.endPoint]);
+    }
+  }
+
+  for (const e of 边们) {
+    const 路 = 路表.get(e.id);
+    // 原曲线（短、顺，就是 Unreal/Blender 那种 noodle）：起终点直连、控制点沿出口方向拉开
+    const 直路 = 密采样(曲线采样(e.源点.x, e.源点.y, e.终点.x, e.终点.y, false), 12);
+    const 直长 = 点列长度(直路);
+
+    let 点们 = 直路.map(p => ({ x: p[0], y: p[1] }));
+    // ⚠️ 这里只做布尔判断、而且用早停 —— 一开始写的是「算每条线在每个框里各走了多少 px」，
+    //    32 条线 × 两次 × 几百个采样点 × 26 个框，一次画线 561ms。
+    //    松手之后卡半秒，体感就是「拖完卡一下」。
+    const 直撞三 = 撞了第三框(直路, 框位, e.自, e.到);
+    if (直撞三 && 路 && 路.length >= 2) {
+      const 绕点 = 路.map(p => [p.x, p.y]);
+      const 绕长 = 点列长度(绕点);
+      // 绕行短于 1.6 倍才值得：绕成两倍还不如让线直一点（Unreal 的线本来就穿节点）。
+      if (绕长 < 直长 * 1.6) 点们 = 绕点.map(p => ({ x: p[0], y: p[1] }));
+    }
+    // 兜底：libavoid 没算出结果时也画，不能没线
+    if (!点们 || 点们.length < 2) {
+      点们 = [e.源点, { x: e.终点.x, y: e.源点.y }, e.终点];
+    }
+    // 相邻重合点去掉，否则圆角会算出 NaN
+    const 清 = [];
+    for (const p of 点们) {
+      const 末 = 清[清.length - 1];
+      if (!末 || Math.abs(末.x - p.x) > 0.01 || Math.abs(末.y - p.y) > 0.01) 清.push(p);
+    }
+    // ⚠️ 不能画成直角折线 —— 那是我第一版干的事，出来像电路板。
+    //
+    // 业内好看的那几家（Unreal Blueprint / Blender / Shader Graph / ComfyUI）
+    // 画的全是**曲线**。而避让正确的那套（libavoid）算出来的是**正交折线**。
+    // 两者不冲突：正交折线是「轨道」，曲线是「外观」——
+    //   "Curved: interpolate smooth curves through orthogonal waypoints"
+    //   "All edge styles share the same upstream routing logic through the orthogonal path builder"
+    // 所以：轨道定去哪儿，Catmull-Rom 把它揉顺。
+    const d = 样条成路(清.map(p => [p.x, p.y]));
+    const p = 画一条(d, '#7a6a3f', 1.2, e.自, e.到);
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    t.textContent = e.题;
+    p.appendChild(t);
+    画箭头(e.终点.x, e.终点.y, '#7a6a3f', e.自, e.到, e.朝);
   }
 
 

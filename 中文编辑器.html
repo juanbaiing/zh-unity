@@ -1974,6 +1974,774 @@ if (typeof module !== 'undefined') module.exports = 出口;
 })();
 
 </script>
+<!-- 线绕框：libavoided-js（libavoid 的 JS 移植）。由 _做libavoid.js 生成，别手改 -->
+<script>
+/* ===== libavoided.js ===== */
+// ⚠️ 这是第三方库 libavoided-js@0.1.2 的打包产物，被 _做libavoid.js 转成了 IIFE。
+//    不要手改这个文件 —— 要改去改 _做libavoid.js 再重跑。
+//
+//    为什么用它：线绕框这件事，业内做得好的是 libavoid（Wybrow 2009，
+//    "Orthogonal Connector Routing"）。它的三件套是
+//      ① 正交可见性图  ② A* 搜最短路  ③ 通道分离（平行线不糊在一起）
+//    关键参数就是「好不好看」本身：
+//      bendPenalty 50        拐一次弯罚 50（拐弯是可读性的第二位，Purchase 1997）
+//      crossingPenalty 200   跟别的线交叉罚 200
+//      edgeSpacing 8         平行线之间的间距
+//      obstacleMargin 10     离框的余量
+//    我自己写的那版只有「上/下/左/右四种兜法」，出来是楼梯状，所以丑。
+(function(){
+// src/types.ts
+var DEFAULT_OPTIONS = {
+  routingStyle: "orthogonal",
+  obstacleMargin: 10,
+  edgeSpacing: 8,
+  bendPenalty: 50,
+  crossingPenalty: 200,
+  lengthPenalty: 1
+};
+
+// src/geometry.ts
+var EPSILON = 1e-9;
+function pointEquals(a, b) {
+  return Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON;
+}
+function manhattanDistance(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+function expandRect(rect, margin) {
+  return {
+    x: rect.x - margin,
+    y: rect.y - margin,
+    width: rect.width + 2 * margin,
+    height: rect.height + 2 * margin
+  };
+}
+function pointInRect(p, rect) {
+  return p.x > rect.x + EPSILON && p.x < rect.x + rect.width - EPSILON && p.y > rect.y + EPSILON && p.y < rect.y + rect.height - EPSILON;
+}
+function segmentIntersectsRect(seg, rect) {
+  const { p1, p2 } = seg;
+  const minX = Math.min(p1.x, p2.x);
+  const maxX = Math.max(p1.x, p2.x);
+  const minY = Math.min(p1.y, p2.y);
+  const maxY = Math.max(p1.y, p2.y);
+  const rLeft = rect.x;
+  const rRight = rect.x + rect.width;
+  const rTop = rect.y;
+  const rBottom = rect.y + rect.height;
+  if (Math.abs(p1.y - p2.y) < EPSILON) {
+    const y = p1.y;
+    if (y <= rTop + EPSILON || y >= rBottom - EPSILON) return false;
+    if (maxX <= rLeft + EPSILON || minX >= rRight - EPSILON) return false;
+    return true;
+  }
+  if (Math.abs(p1.x - p2.x) < EPSILON) {
+    const x = p1.x;
+    if (x <= rLeft + EPSILON || x >= rRight - EPSILON) return false;
+    if (maxY <= rTop + EPSILON || minY >= rBottom - EPSILON) return false;
+    return true;
+  }
+  if (maxX <= rLeft + EPSILON || minX >= rRight - EPSILON) return false;
+  if (maxY <= rTop + EPSILON || minY >= rBottom - EPSILON) return false;
+  return true;
+}
+function orthogonalSegmentsCross(a, b) {
+  const aHoriz = Math.abs(a.p1.y - a.p2.y) < EPSILON;
+  const bHoriz = Math.abs(b.p1.y - b.p2.y) < EPSILON;
+  if (aHoriz === bHoriz) return false;
+  const horiz = aHoriz ? a : b;
+  const vert = aHoriz ? b : a;
+  const hY = horiz.p1.y;
+  const hMinX = Math.min(horiz.p1.x, horiz.p2.x);
+  const hMaxX = Math.max(horiz.p1.x, horiz.p2.x);
+  const vX = vert.p1.x;
+  const vMinY = Math.min(vert.p1.y, vert.p2.y);
+  const vMaxY = Math.max(vert.p1.y, vert.p2.y);
+  return vX > hMinX + EPSILON && vX < hMaxX - EPSILON && hY > vMinY + EPSILON && hY < vMaxY - EPSILON;
+}
+function pointKey(p) {
+  return `${p.x},${p.y}`;
+}
+function parsePointKey(key) {
+  const [x, y] = key.split(",").map(Number);
+  return { x, y };
+}
+function areCollinear(a, b, c) {
+  const sameX = Math.abs(a.x - b.x) < EPSILON && Math.abs(b.x - c.x) < EPSILON;
+  const sameY = Math.abs(a.y - b.y) < EPSILON && Math.abs(b.y - c.y) < EPSILON;
+  return sameX || sameY;
+}
+
+// src/grid.ts
+function buildGrid(obstacles, edges, obstacleMargin) {
+  const expandedObstacles = obstacles.map((o) => expandRect(o, obstacleMargin));
+  const anchorKeys = /* @__PURE__ */ new Set();
+  for (const edge of edges) {
+    anchorKeys.add(pointKey(edge.sourcePoint));
+    anchorKeys.add(pointKey(edge.targetPoint));
+  }
+  const xCoords = /* @__PURE__ */ new Set();
+  const yCoords = /* @__PURE__ */ new Set();
+  for (const rect of expandedObstacles) {
+    xCoords.add(rect.x);
+    xCoords.add(rect.x + rect.width);
+    yCoords.add(rect.y);
+    yCoords.add(rect.y + rect.height);
+  }
+  for (const edge of edges) {
+    xCoords.add(edge.sourcePoint.x);
+    xCoords.add(edge.targetPoint.x);
+    yCoords.add(edge.sourcePoint.y);
+    yCoords.add(edge.targetPoint.y);
+    if (edge.previousPath) {
+      for (const p of edge.previousPath) {
+        xCoords.add(p.x);
+        yCoords.add(p.y);
+      }
+    }
+  }
+  const sortedX = [...xCoords].sort((a, b) => a - b);
+  const sortedY = [...yCoords].sort((a, b) => a - b);
+  for (let i = 0; i < sortedX.length - 1; i++) {
+    const mid = (sortedX[i] + sortedX[i + 1]) / 2;
+    xCoords.add(mid);
+  }
+  for (let i = 0; i < sortedY.length - 1; i++) {
+    const mid = (sortedY[i] + sortedY[i + 1]) / 2;
+    yCoords.add(mid);
+  }
+  const vertices = /* @__PURE__ */ new Map();
+  const finalX = [...xCoords].sort((a, b) => a - b);
+  const finalY = [...yCoords].sort((a, b) => a - b);
+  for (const x of finalX) {
+    for (const y of finalY) {
+      const p = { x, y };
+      const key = pointKey(p);
+      const isAnchor = anchorKeys.has(key);
+      if (!isAnchor && isInsideAnyObstacle(p, expandedObstacles)) continue;
+      vertices.set(key, { point: p, neighbors: /* @__PURE__ */ new Map() });
+    }
+  }
+  for (const y of finalY) {
+    const xsAtY = finalX.filter((x) => vertices.has(pointKey({ x, y })));
+    for (let i = 0; i < xsAtY.length - 1; i++) {
+      const p1 = { x: xsAtY[i], y };
+      const p2 = { x: xsAtY[i + 1], y };
+      const seg = { p1, p2 };
+      if (!segmentPassesThroughObstacle(seg, expandedObstacles)) {
+        const k1 = pointKey(p1);
+        const k2 = pointKey(p2);
+        const dist = Math.abs(p2.x - p1.x);
+        vertices.get(k1).neighbors.set(k2, dist);
+        vertices.get(k2).neighbors.set(k1, dist);
+      }
+    }
+  }
+  for (const x of finalX) {
+    const ysAtX = finalY.filter((y) => vertices.has(pointKey({ x, y })));
+    for (let i = 0; i < ysAtX.length - 1; i++) {
+      const p1 = { x, y: ysAtX[i] };
+      const p2 = { x, y: ysAtX[i + 1] };
+      const seg = { p1, p2 };
+      if (!segmentPassesThroughObstacle(seg, expandedObstacles)) {
+        const k1 = pointKey(p1);
+        const k2 = pointKey(p2);
+        const dist = Math.abs(p2.y - p1.y);
+        vertices.get(k1).neighbors.set(k2, dist);
+        vertices.get(k2).neighbors.set(k1, dist);
+      }
+    }
+  }
+  return { vertices, expandedObstacles, rawObstacles: obstacles };
+}
+function isInsideAnyObstacle(p, obstacles) {
+  return obstacles.some((o) => pointInRect(p, o));
+}
+function segmentPassesThroughObstacle(seg, obstacles) {
+  return obstacles.some((o) => segmentIntersectsRect(seg, o));
+}
+function ensurePointInGrid(grid, point) {
+  const key = pointKey(point);
+  if (!grid.vertices.has(key)) {
+    const vertex2 = { point, neighbors: /* @__PURE__ */ new Map() };
+    grid.vertices.set(key, vertex2);
+  }
+  const vertex = grid.vertices.get(key);
+  connectAnchorToGrid(grid, key, point, vertex);
+}
+function connectAnchorToGrid(grid, key, point, vertex) {
+  const sameXVertices = [];
+  const sameYVertices = [];
+  for (const [nKey, nVertex] of grid.vertices) {
+    if (nKey === key) continue;
+    const np = nVertex.point;
+    if (Math.abs(np.x - point.x) < 1e-9) {
+      sameXVertices.push({ key: nKey, vertex: nVertex, dist: Math.abs(np.y - point.y) });
+    } else if (Math.abs(np.y - point.y) < 1e-9) {
+      sameYVertices.push({ key: nKey, vertex: nVertex, dist: Math.abs(np.x - point.x) });
+    }
+  }
+  sameXVertices.sort((a, b) => a.dist - b.dist);
+  sameYVertices.sort((a, b) => a.dist - b.dist);
+  const above = sameXVertices.find((v) => v.vertex.point.y < point.y && !hasVertexBetween(grid, point, v.vertex.point, "vertical") && !segmentThroughRawObstacle(point, v.vertex.point, grid.rawObstacles));
+  const below = sameXVertices.find((v) => v.vertex.point.y > point.y && !hasVertexBetween(grid, point, v.vertex.point, "vertical") && !segmentThroughRawObstacle(point, v.vertex.point, grid.rawObstacles));
+  const left = sameYVertices.find((v) => v.vertex.point.x < point.x && !hasVertexBetween(grid, point, v.vertex.point, "horizontal") && !segmentThroughRawObstacle(point, v.vertex.point, grid.rawObstacles));
+  const right = sameYVertices.find((v) => v.vertex.point.x > point.x && !hasVertexBetween(grid, point, v.vertex.point, "horizontal") && !segmentThroughRawObstacle(point, v.vertex.point, grid.rawObstacles));
+  for (const neighbor of [above, below, left, right]) {
+    if (neighbor) {
+      vertex.neighbors.set(neighbor.key, neighbor.dist);
+      neighbor.vertex.neighbors.set(key, neighbor.dist);
+    }
+  }
+}
+function segmentThroughRawObstacle(a, b, obstacles) {
+  const seg = { p1: a, p2: b };
+  return obstacles.some((o) => segmentIntersectsRect(seg, o));
+}
+function hasVertexBetween(grid, a, b, direction) {
+  for (const [, v] of grid.vertices) {
+    const p = v.point;
+    if (Math.abs(p.x - a.x) < 1e-9 && Math.abs(p.y - a.y) < 1e-9 || Math.abs(p.x - b.x) < 1e-9 && Math.abs(p.y - b.y) < 1e-9) continue;
+    if (direction === "horizontal") {
+      if (Math.abs(p.y - a.y) < 1e-9) {
+        const minX = Math.min(a.x, b.x);
+        const maxX = Math.max(a.x, b.x);
+        if (p.x > minX + 1e-9 && p.x < maxX - 1e-9) return true;
+      }
+    } else {
+      if (Math.abs(p.x - a.x) < 1e-9) {
+        const minY = Math.min(a.y, b.y);
+        const maxY = Math.max(a.y, b.y);
+        if (p.y > minY + 1e-9 && p.y < maxY - 1e-9) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// src/priority-queue.ts
+var PriorityQueue = class {
+  heap = [];
+  get size() {
+    return this.heap.length;
+  }
+  isEmpty() {
+    return this.heap.length === 0;
+  }
+  push(item, priority) {
+    this.heap.push({ item, priority });
+    this.bubbleUp(this.heap.length - 1);
+  }
+  pop() {
+    if (this.heap.length === 0) return void 0;
+    const top = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      this.sinkDown(0);
+    }
+    return top.item;
+  }
+  peek() {
+    return this.heap.length > 0 ? this.heap[0].item : void 0;
+  }
+  peekPriority() {
+    return this.heap.length > 0 ? this.heap[0].priority : void 0;
+  }
+  bubbleUp(index) {
+    while (index > 0) {
+      const parentIndex = index - 1 >> 1;
+      if (this.heap[parentIndex].priority <= this.heap[index].priority) break;
+      this.swap(index, parentIndex);
+      index = parentIndex;
+    }
+  }
+  sinkDown(index) {
+    const length = this.heap.length;
+    while (true) {
+      const left = 2 * index + 1;
+      const right = 2 * index + 2;
+      let smallest = index;
+      if (left < length && this.heap[left].priority < this.heap[smallest].priority) {
+        smallest = left;
+      }
+      if (right < length && this.heap[right].priority < this.heap[smallest].priority) {
+        smallest = right;
+      }
+      if (smallest === index) break;
+      this.swap(index, smallest);
+      index = smallest;
+    }
+  }
+  swap(a, b) {
+    [this.heap[a], this.heap[b]] = [this.heap[b], this.heap[a]];
+  }
+};
+
+// src/pathfinder.ts
+function stateKey(posKey, dir) {
+  return `${posKey}|${dir}`;
+}
+function getDirection(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return dx > 0 ? "right" : "left";
+  }
+  if (Math.abs(dy) > Math.abs(dx)) {
+    return dy > 0 ? "down" : "up";
+  }
+  return "none";
+}
+function isBend(d1, d2) {
+  if (d1 === "none" || d2 === "none") return false;
+  return d1 !== d2;
+}
+var RoutedSegments = class {
+  segments = [];
+  addPath(path) {
+    for (let i = 0; i < path.length - 1; i++) {
+      this.segments.push({ p1: path[i], p2: path[i + 1] });
+    }
+  }
+  countCrossings(seg) {
+    let count = 0;
+    for (const existing of this.segments) {
+      if (orthogonalSegmentsCross(seg, existing)) count++;
+    }
+    return count;
+  }
+};
+function findPath(grid, source, target, options, routedSegments) {
+  const sourceKey = pointKey(source);
+  const targetKey = pointKey(target);
+  if (!grid.vertices.has(sourceKey) || !grid.vertices.has(targetKey)) {
+    return null;
+  }
+  if (sourceKey === targetKey) {
+    return [source];
+  }
+  const pq = new PriorityQueue();
+  const gScore = /* @__PURE__ */ new Map();
+  const cameFrom = /* @__PURE__ */ new Map();
+  const startDir = options.sourceDirection ?? "none";
+  const startState = stateKey(sourceKey, startDir);
+  gScore.set(startState, 0);
+  pq.push({ key: sourceKey, direction: startDir }, manhattanDistance(source, target) * options.lengthPenalty);
+  while (!pq.isEmpty()) {
+    const current = pq.pop();
+    const currentStateKey = stateKey(current.key, current.direction);
+    const currentG = gScore.get(currentStateKey);
+    if (current.key === targetKey) {
+      if (!options.targetDirection || current.direction === options.targetDirection) {
+        return reconstructPath(cameFrom, current.key, current.direction, sourceKey);
+      }
+      continue;
+    }
+    const vertex = grid.vertices.get(current.key);
+    if (!vertex) continue;
+    const currentPoint = vertex.point;
+    for (const [neighborKey, edgeDist] of vertex.neighbors) {
+      const neighborVertex = grid.vertices.get(neighborKey);
+      if (!neighborVertex) continue;
+      const neighborPoint = neighborVertex.point;
+      const moveDir = getDirection(currentPoint, neighborPoint);
+      if (options.sourceDirection && current.key === sourceKey && moveDir !== options.sourceDirection) {
+        continue;
+      }
+      let cost = currentG + edgeDist * options.lengthPenalty;
+      if (isBend(current.direction, moveDir)) {
+        cost += options.bendPenalty;
+      }
+      if (routedSegments) {
+        const seg = { p1: currentPoint, p2: neighborPoint };
+        const crossings = routedSegments.countCrossings(seg);
+        cost += crossings * options.crossingPenalty;
+      }
+      const neighborStateKey = stateKey(neighborKey, moveDir);
+      const existingG = gScore.get(neighborStateKey);
+      if (existingG === void 0 || cost < existingG) {
+        gScore.set(neighborStateKey, cost);
+        cameFrom.set(neighborStateKey, { posKey: current.key, dir: current.direction });
+        const h = manhattanDistance(neighborPoint, target) * options.lengthPenalty;
+        pq.push({ key: neighborKey, direction: moveDir }, cost + h);
+      }
+    }
+  }
+  return null;
+}
+function reconstructPath(cameFrom, endKey, endDir, startKey) {
+  const path = [];
+  let currentSK = stateKey(endKey, endDir);
+  let currentPosKey = endKey;
+  while (currentPosKey !== startKey || path.length === 0) {
+    path.push(parsePointKey(currentPosKey));
+    const prev = cameFrom.get(currentSK);
+    if (!prev) break;
+    currentSK = stateKey(prev.posKey, prev.dir);
+    currentPosKey = prev.posKey;
+  }
+  if (path.length === 0 || pointKey(path[path.length - 1]) !== startKey) {
+    path.push(parsePointKey(startKey));
+  }
+  path.reverse();
+  return path;
+}
+
+// src/simplify.ts
+function mergeCollinear(path) {
+  if (path.length <= 2) return [...path];
+  const result = [path[0]];
+  for (let i = 1; i < path.length - 1; i++) {
+    if (!areCollinear(result[result.length - 1], path[i], path[i + 1])) {
+      result.push(path[i]);
+    }
+  }
+  result.push(path[path.length - 1]);
+  return result;
+}
+function spaceParallelSegments(paths, edgeSpacing) {
+  const result = paths.map((p) => p.map((pt) => ({ ...pt })));
+  const groups = /* @__PURE__ */ new Map();
+  for (let eIdx = 0; eIdx < result.length; eIdx++) {
+    const path = result[eIdx];
+    for (let sIdx = 0; sIdx < path.length - 1; sIdx++) {
+      const p1 = path[sIdx];
+      const p2 = path[sIdx + 1];
+      const isHoriz = Math.abs(p1.y - p2.y) < 1e-9;
+      const isVert = Math.abs(p1.x - p2.x) < 1e-9;
+      if (!isHoriz && !isVert) continue;
+      const orientation = isHoriz ? "horizontal" : "vertical";
+      const coord = isHoriz ? p1.y : p1.x;
+      const key = `${orientation}:${coord}`;
+      if (!groups.has(key)) {
+        groups.set(key, { orientation, coordinate: coord, segments: [] });
+      }
+      const min = isHoriz ? Math.min(p1.x, p2.x) : Math.min(p1.y, p2.y);
+      const max = isHoriz ? Math.max(p1.x, p2.x) : Math.max(p1.y, p2.y);
+      groups.get(key).segments.push({ edgeIndex: eIdx, segIndex: sIdx, min, max });
+    }
+  }
+  for (const [, group] of groups) {
+    const byEdge = /* @__PURE__ */ new Map();
+    for (const seg of group.segments) {
+      if (!byEdge.has(seg.edgeIndex)) byEdge.set(seg.edgeIndex, []);
+      byEdge.get(seg.edgeIndex).push(seg);
+    }
+    const multiEdgeSegs = group.segments.filter((seg) => {
+      for (const other of group.segments) {
+        if (other.edgeIndex === seg.edgeIndex) continue;
+        if (other.min < seg.max - 1e-9 && other.max > seg.min + 1e-9) return true;
+      }
+      return false;
+    });
+    if (multiEdgeSegs.length <= 1) continue;
+    const clusters = findOverlappingClusters(multiEdgeSegs);
+    for (const cluster of clusters) {
+      if (cluster.length <= 1) continue;
+      const edgeSet = /* @__PURE__ */ new Map();
+      for (const seg of cluster) {
+        if (!edgeSet.has(seg.edgeIndex)) {
+          edgeSet.set(seg.edgeIndex, seg);
+        }
+      }
+      const uniqueByEdge = [...edgeSet.values()];
+      if (uniqueByEdge.length <= 1) continue;
+      const totalSpread = (uniqueByEdge.length - 1) * edgeSpacing;
+      const baseCoord = group.coordinate;
+      for (let i = 0; i < uniqueByEdge.length; i++) {
+        const offset = -totalSpread / 2 + i * edgeSpacing;
+        if (Math.abs(offset) < 1e-9) continue;
+        const seg = uniqueByEdge[i];
+        const path = result[seg.edgeIndex];
+        shiftSegment(path, seg.segIndex, group.orientation, offset);
+      }
+    }
+  }
+  return result;
+}
+function shiftSegment(path, segIndex, orientation, offset) {
+  if (orientation === "horizontal") {
+    path[segIndex].y += offset;
+    path[segIndex + 1].y += offset;
+  } else {
+    path[segIndex].x += offset;
+    path[segIndex + 1].x += offset;
+  }
+}
+function findOverlappingClusters(segments) {
+  const sorted = [...segments].sort((a, b) => a.min - b.min);
+  const clusters = [];
+  let current = [sorted[0]];
+  let currentMax = sorted[0].max;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].min < currentMax - 1e-9) {
+      current.push(sorted[i]);
+      currentMax = Math.max(currentMax, sorted[i].max);
+    } else {
+      clusters.push(current);
+      current = [sorted[i]];
+      currentMax = sorted[i].max;
+    }
+  }
+  clusters.push(current);
+  return clusters;
+}
+function nudgeAwayFromObstacles(paths, obstacles, margin) {
+  return paths.map((path) => nudgePath(path, obstacles, margin));
+}
+function nudgePath(path, obstacles, margin) {
+  if (path.length <= 2) return [...path];
+  const result = path.map((p) => ({ ...p }));
+  for (let i = 0; i < result.length - 1; i++) {
+    const p1 = result[i];
+    const p2 = result[i + 1];
+    const isHoriz = Math.abs(p1.y - p2.y) < 1e-9;
+    const isVert = Math.abs(p1.x - p2.x) < 1e-9;
+    if (!isHoriz && !isVert) continue;
+    const p1IsEndpoint = i === 0;
+    const p2IsEndpoint = i + 1 === result.length - 1;
+    if (p1IsEndpoint && p2IsEndpoint) continue;
+    for (const obs of obstacles) {
+      if (isHoriz) {
+        const segY = p1.y;
+        const segMinX = Math.min(p1.x, p2.x);
+        const segMaxX = Math.max(p1.x, p2.x);
+        if (segMaxX <= obs.x || segMinX >= obs.x + obs.width) continue;
+        const distToTop = segY - obs.y;
+        const distToBottom = obs.y + obs.height - segY;
+        let shift = 0;
+        if (distToTop > 0 && distToTop < margin) {
+          shift = -(margin - distToTop);
+        } else if (distToBottom > 0 && distToBottom < margin) {
+          shift = margin - distToBottom;
+        }
+        if (Math.abs(shift) > 1e-9) {
+          if (!p1IsEndpoint) result[i].y += shift;
+          if (!p2IsEndpoint) result[i + 1].y += shift;
+        }
+      } else {
+        const segX = p1.x;
+        const segMinY = Math.min(p1.y, p2.y);
+        const segMaxY = Math.max(p1.y, p2.y);
+        if (segMaxY <= obs.y || segMinY >= obs.y + obs.height) continue;
+        const distToLeft = segX - obs.x;
+        const distToRight = obs.x + obs.width - segX;
+        let shift = 0;
+        if (distToLeft > 0 && distToLeft < margin) {
+          shift = -(margin - distToLeft);
+        } else if (distToRight > 0 && distToRight < margin) {
+          shift = margin - distToRight;
+        }
+        if (Math.abs(shift) > 1e-9) {
+          if (!p1IsEndpoint) result[i].x += shift;
+          if (!p2IsEndpoint) result[i + 1].x += shift;
+        }
+      }
+    }
+  }
+  return result;
+}
+function simplifyPaths(paths, obstacles, edgeSpacing, obstacleMargin) {
+  let result = paths.map(mergeCollinear);
+  result = spaceParallelSegments(result, edgeSpacing);
+  result = nudgeAwayFromObstacles(result, obstacles, obstacleMargin);
+  result = result.map(mergeCollinear);
+  return result;
+}
+
+// src/router.ts
+function routeEdges(input, options) {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const { obstacles, edges } = input;
+  if (edges.length === 0) {
+    return { edges: [] };
+  }
+  const pinnedEdges = [];
+  const routableEdges = [];
+  for (const edge of edges) {
+    if (edge.pinnedWaypoints && edge.pinnedWaypoints.length > 0) {
+      pinnedEdges.push(edge);
+    } else {
+      routableEdges.push(edge);
+    }
+  }
+  const sortedEdges = [...routableEdges].sort((a, b) => {
+    const distA = manhattanDistance(a.sourcePoint, a.targetPoint);
+    const distB = manhattanDistance(b.sourcePoint, b.targetPoint);
+    return distA - distB;
+  });
+  const grid = buildGrid(obstacles, edges, opts.obstacleMargin);
+  for (const edge of edges) {
+    ensurePointInGrid(grid, edge.sourcePoint);
+    ensurePointInGrid(grid, edge.targetPoint);
+  }
+  const routedSegments = new RoutedSegments();
+  const rawPaths = /* @__PURE__ */ new Map();
+  for (const edge of pinnedEdges) {
+    const path = [edge.sourcePoint, ...edge.pinnedWaypoints, edge.targetPoint];
+    rawPaths.set(edge.id, path);
+    routedSegments.addPath(path);
+  }
+  for (const edge of sortedEdges) {
+    const path = findPath(
+      grid,
+      edge.sourcePoint,
+      edge.targetPoint,
+      {
+        bendPenalty: opts.bendPenalty,
+        crossingPenalty: opts.crossingPenalty,
+        lengthPenalty: opts.lengthPenalty,
+        sourceDirection: edge.sourceDirection,
+        targetDirection: edge.targetDirection
+      },
+      routedSegments
+    );
+    if (path) {
+      rawPaths.set(edge.id, path);
+      routedSegments.addPath(path);
+    } else {
+      rawPaths.set(edge.id, [edge.sourcePoint, edge.targetPoint]);
+    }
+  }
+  const pathsInOrder = edges.map((e) => rawPaths.get(e.id) || [e.sourcePoint, e.targetPoint]);
+  const pinnedIds = new Set(pinnedEdges.map((e) => e.id));
+  const nonPinnedIndices = [];
+  const nonPinnedPaths = [];
+  for (let i = 0; i < edges.length; i++) {
+    if (!pinnedIds.has(edges[i].id)) {
+      nonPinnedIndices.push(i);
+      nonPinnedPaths.push(pathsInOrder[i]);
+    }
+  }
+  const simplifiedNonPinned = simplifyPaths(
+    nonPinnedPaths,
+    grid.expandedObstacles,
+    opts.edgeSpacing,
+    opts.obstacleMargin
+  );
+  const finalPaths = [...pathsInOrder];
+  for (let i = 0; i < nonPinnedIndices.length; i++) {
+    finalPaths[nonPinnedIndices[i]] = simplifiedNonPinned[i];
+  }
+  const routedEdges = edges.map((edge, i) => {
+    const path = finalPaths[i];
+    return formatEdge(edge, path);
+  });
+  return { edges: routedEdges };
+}
+function formatEdge(edge, path) {
+  return {
+    id: edge.id,
+    sections: [
+      {
+        startPoint: path[0],
+        endPoint: path[path.length - 1],
+        bendPoints: path.slice(1, -1),
+        incomingShape: edge.sourceId,
+        outgoingShape: edge.targetId
+      }
+    ]
+  };
+}
+
+// src/incremental.ts
+function edgeTopologyChanged(edge, previousEdge, currentObstacles, previousObstacles) {
+  if (!previousEdge) return true;
+  if (!pointEquals(edge.sourcePoint, previousEdge.sourcePoint)) return true;
+  if (!pointEquals(edge.targetPoint, previousEdge.targetPoint)) return true;
+  if (currentObstacles.length !== previousObstacles.length) return true;
+  const currentIds = new Set(currentObstacles.map((o) => o.id));
+  const previousIds = new Set(previousObstacles.map((o) => o.id));
+  for (const id of currentIds) {
+    if (!previousIds.has(id)) return true;
+  }
+  for (const curr of currentObstacles) {
+    const prev = previousObstacles.find((o) => o.id === curr.id);
+    if (!prev) return true;
+    if (curr.x !== prev.x || curr.y !== prev.y || curr.width !== prev.width || curr.height !== prev.height) {
+      return true;
+    }
+  }
+  return false;
+}
+function routeEdgesIncremental(input, previousInput, previousOutput, options) {
+  if (!previousInput || !previousOutput) {
+    return routeEdges(input, options);
+  }
+  const previousEdgeMap = /* @__PURE__ */ new Map();
+  for (const edge of previousInput.edges) {
+    previousEdgeMap.set(edge.id, edge);
+  }
+  const previousResultMap = /* @__PURE__ */ new Map();
+  for (const routed of previousOutput.edges) {
+    if (routed.sections.length > 0) {
+      const section = routed.sections[0];
+      const path = [section.startPoint, ...section.bendPoints, section.endPoint];
+      previousResultMap.set(routed.id, path);
+    }
+  }
+  const changedEdges = [];
+  const unchangedEdges = /* @__PURE__ */ new Map();
+  for (const edge of input.edges) {
+    const prevEdge = previousEdgeMap.get(edge.id);
+    const changed = edgeTopologyChanged(
+      edge,
+      prevEdge,
+      input.obstacles,
+      previousInput.obstacles
+    );
+    if (changed) {
+      const prevPath = previousResultMap.get(edge.id);
+      changedEdges.push({
+        ...edge,
+        previousPath: prevPath || edge.previousPath
+      });
+    } else {
+      const prevPath = previousResultMap.get(edge.id);
+      if (prevPath) {
+        unchangedEdges.set(edge.id, prevPath);
+      } else {
+        changedEdges.push(edge);
+      }
+    }
+  }
+  if (changedEdges.length === 0) {
+    return buildOutput(input.edges, unchangedEdges);
+  }
+  const fullInput = {
+    obstacles: input.obstacles,
+    edges: input.edges.map((e) => {
+      const prevPath = previousResultMap.get(e.id);
+      return prevPath ? { ...e, previousPath: prevPath } : e;
+    })
+  };
+  return routeEdges(fullInput, options);
+}
+function buildOutput(edges, pathMap) {
+  return {
+    edges: edges.map((edge) => {
+      const path = pathMap.get(edge.id) || [edge.sourcePoint, edge.targetPoint];
+      return {
+        id: edge.id,
+        sections: [
+          {
+            startPoint: path[0],
+            endPoint: path[path.length - 1],
+            bendPoints: path.slice(1, -1),
+            incomingShape: edge.sourceId,
+            outgoingShape: edge.targetId
+          }
+        ]
+      };
+    })
+  };
+}
+
+  window.libavoided = { DEFAULT_OPTIONS, routeEdges, routeEdgesIncremental };
+})();
+
+</script>
 <script>
 /* ===== blocks2.js ===== */
 (function () {
@@ -4329,6 +5097,7 @@ function 建注释框(框) {
       网.框层.appendChild(el);
       提起过 = true;
       el.classList.add('拖动中');
+      网.拖中 = true;
     };
     const 移 = ev => {
       探(ev);
@@ -4357,6 +5126,9 @@ function 建注释框(框) {
       document.removeEventListener('pointermove', 移);
       document.removeEventListener('pointerup', 停);
       归位(框);
+      // 拖动结束：把线按完整算法重算一遍（拖动中用的是降级折线）
+      网.拖中 = false;
+      画线();
       存布局(); 存注释框();
     };
     document.addEventListener('pointermove', 移);
@@ -5227,6 +5999,8 @@ function 建实例框(实) {
     e.stopPropagation();
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
     const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
+    // 拖动期间不跑全图路由（一次 130ms 会卡成幻灯片），松手再精确算一次
+    网.拖中 = true;
     const 移 = ev => {
       位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
       位.y = Math.round(起.oy + (ev.clientY - 起.y) / (视.z || 1));
@@ -5237,6 +6011,8 @@ function 建实例框(实) {
     const 停 = () => {
       el.removeEventListener('pointermove', 移);
       el.removeEventListener('pointerup', 停);
+      网.拖中 = false;
+      画线();
       存布局();
     };
     el.addEventListener('pointermove', 移);
@@ -5315,6 +6091,33 @@ function 曲线路(x1, y1, x2, y2) {
   return `M ${x1} ${y1} C ${x1 + 朝 * 伸} ${y1}, ${x2 - 朝 * 伸} ${y2}, ${x2} ${y2}`;
 }
 
+// 穿点成曲线（Catmull-Rom 转三次贝塞尔）。
+//
+// libavoid 给的是直角的拐点，照着连就是电路板。这里把这些拐点当**路标**，
+// 曲线从它们中间圆滑穿过 —— 用 Unreal / Blender 那种 noodle 的手感。
+//
+// ⚠️ 圆滑会「切角」：两条正交段相交的那个直角，曲线会抄近道切过去。
+//    切掉多少取决于张力。默认 1/6（Catmull-Rom 的标准值）在转角处大约切
+//    掉拐点两侧各 1/6 段长；libavoid 的 obstacleMargin 是 10px，够兜。
+function 样条成路(点们) {
+  if (!点们 || 点们.length < 2) return '';
+  const 数 = v => Math.round(v * 10) / 10;
+  if (点们.length === 2) {
+    return `M ${数(点们[0][0])} ${数(点们[0][1])} L ${数(点们[1][0])} ${数(点们[1][1])}`;
+  }
+  let d = `M ${数(点们[0][0])} ${数(点们[0][1])}`;
+  for (let i = 0; i < 点们.length - 1; i++) {
+    const p0 = 点们[i - 1] || 点们[i];
+    const p1 = 点们[i];
+    const p2 = 点们[i + 1];
+    const p3 = 点们[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${数(c1x)} ${数(c1y)}, ${数(c2x)} ${数(c2y)}, ${数(p2[0])} ${数(p2[1])}`;
+  }
+  return d;
+}
+
 // 竖着连（源在上、目标在下，或反过来）：控制点沿竖直方向拉开。
 function 曲线路竖(x1, y1, x2, y2) {
   const 距 = Math.abs(y2 - y1);
@@ -5332,36 +6135,82 @@ function 选走线(x1, y1, x2, y2, 框位, 自id, 到id, 竖) {
     return 折线成路(正交点(x1, y1, x2, y2, 框位, 自id, 到id), 14);
   }
 
-  // ── 曲线 + 只在该避的时候才避 ──
+  // ── 曲线 + 该避的时候才避 ──
   //
   // 曲线好看（短距离就该是软的），但它**一点避让都没有**：中间横着个框，
-  // 它就从框里穿过去。实测 Coin→Cube 那条钻进 Cube 内部走了一大段才出来，
-  // 看着像「连到了 Cube 上」—— 学术里叫 edge ambiguity
+  // 它就从框里穿过去。学术里叫 edge ambiguity
   // （Ambiguity-Free Edge-Bundling, TVCG：线压在不相关节点上会让人误判连接关系）。
   //
   // 所以不是把曲线全改成折线，而是：
-  //   1. 先按曲线密采样，一个不相干的框都不撞 → 就是它，原样返回
-  //   2. 撞了 → 拿撞到的那些框当障碍，生成「上/下/左/右」四种绕法
-  //   3. 四种都密采样评分（穿框数 > 长度），选最好的，拐角磨圆
-  // 绝大多数短线还是曲线，只有真被挡住的那几条会变成绕行。
+  //   1. 先按曲线密采样 —— 连**自己的框**算进去之后罚分都是 0 → 就是它，原样返回
+  //   2. 罚分了 → 拿穿过的那些框当障碍，生成「上/下/左/右」四种绕法
+  //   3. 四种都密采样算罚分+长度，选最好的，拐角磨圆
+  //
+  // ⚠️ 这里踩过一次：第一版判「撞没撞」时把源框和目标框整个排除了，
+  //    理由是「口长在框里，出去必然穿一小段」。这个豁免太宽 ——
+  //    从边上出去 20px 和横穿 300px 被当成了同一件事，
+  //    于是 enemy→Cube 那八条线横穿 enemy 整个框，判据说「全部干净」。
+  //    改成量**长度**（穿账），超过 框内可忍 才罚。
   const 曲线点 = 密采样(曲线采样(x1, y1, x2, y2, 竖));
-  const 曲线撞 = 撞了谁(曲线点, 框位, 自id, 到id);
-  if (!曲线撞.size) return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
+  if (穿框罚分(曲线点, 框位, 自id, 到id) === 0) return 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2);
 
-  const 障碍 = [...曲线撞].map(id => 框位.get(id)).filter(Boolean);
+  // 障碍 = 这条曲线真穿过的框（含自己的框 —— 它也可能正是被穿的那一个）
+  const 障碍 = [...穿账(曲线点, 框位).keys()].map(id => 框位.get(id)).filter(Boolean);
   let 最好 = null, 最好分 = Infinity;
   for (const 点们 of 绕行候选(x1, y1, x2, y2, 障碍, 竖)) {
     const 密 = 密采样(点们);
-    const 分 = 撞了谁(密, 框位, 自id, 到id).size * 10000 + 点列长度(密);
+    const 分 = 穿框罚分(密, 框位, 自id, 到id) + 点列长度(密);
     if (分 < 最好分) { 最好分 = 分; 最好 = 点们; }
   }
   // 四种都还穿的话，也是「穿得最少的那条」比原曲线强，照样用
   return 最好 ? 折线成路(最好, 14) : (竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2));
 }
 
-// ── 避让要用的小工具 ────────────────────────────────────
+// 同上，但把分数也带出来 —— 调用方要用它挑「从哪条边出去最好」。
+//
+// 为什么要挑：出/入框方向不能靠「取最近的那条边」猜。
+// Coin(614~794) 与 Cube(734~1027) 水平重叠，Coin 的右边界 794 正好**落在 Cube 里面**，
+// 那时「最近的边」恰恰是最差的边 —— 线一出去就已经在 Cube 肚子里了。
+// 所以把几种出入口组合都算一遍，用分数挑。
+function 选走线评分(x1, y1, x2, y2, 框位, 自id, 到id, 竖) {
+  const 首点 = 密采样(曲线采样(x1, y1, x2, y2, 竖));
+  const 首罚 = 穿框罚分(首点, 框位, 自id, 到id);
+  if (首罚 === 0) {
+    return { d: 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2), 分: 点列长度(首点), 罚: 0 };
+  }
+  const 障碍 = [...穿账(首点, 框位).keys()].map(id => 框位.get(id)).filter(Boolean);
+  let 最好点 = null, 最好罚 = Infinity, 最好长 = 0;
+  for (const 点们 of 绕行候选(x1, y1, x2, y2, 障碍, 竖)) {
+    const 密 = 密采样(点们);
+    const 罚 = 穿框罚分(密, 框位, 自id, 到id);
+    if (罚 < 最好罚) { 最好罚 = 罚; 最好点 = 点们; 最好长 = 点列长度(密); }
+  }
+  if (最好点) return { d: 折线成路(最好点, 14), 分: 最好罚 + 最好长, 罚: 最好罚 };
+  return { d: 竖 ? 曲线路竖(x1, y1, x2, y2) : 曲线路(x1, y1, x2, y2), 分: Infinity, 罚: Infinity };
+}
 
-const 避让边距 = 16;
+// 一个点在框里的哪条边最近 —— 线从口出去时走这条，别横穿自己的框。
+//
+// ⚠️ 原来的方向判断是「目标在左就往左出」，完全不看口本身在框里的哪边。
+//    实测 enemy 那个口的 x=1850、框是 1555~1905：口本来就在框的右侧，
+//    可目标 Cube 在左边，于是线从口往左走，**横穿 enemy 整个框 295px** 才出去。
+//    截图里那束「从框里面长出来横着穿过去」的线就是这么来的。
+//    正确的出口是离口最近的那条边 —— 那样框内的那段才最短。
+function 最近边(点, 框) {
+  const 到左 = 点.x - 框.x, 到右 = 框.x + 框.w - 点.x;
+  const 到上 = 点.y - 框.y, 到下 = 框.y + 框.h - 点.y;
+  const 最小 = Math.min(到左, 到右, 到上, 到下);
+  if (最小 === 到左) return { x: 框.x, y: 点.y, 边: '左', 距: 到左 };
+  if (最小 === 到右) return { x: 框.x + 框.w, y: 点.y, 边: '右', 距: 到右 };
+  if (最小 === 到上) return { x: 点.x, y: 框.y, 边: '上', 距: 到上 };
+  return { x: 点.x, y: 框.y + 框.h, 边: '下', 距: 到下 };
+}
+
+// 框内那一段允许多长。口本来就长在框里，出去必然要走一小段 —— 那是它该走的路。
+// 超过这个数就说明它在框里横穿了，得改从别的边走。
+const 框内可忍 = 70;
+
+
 
 // 三次贝塞尔取一个点
 function 贝塞尔(x1, y1, c1x, c1y, c2x, c2y, x2, y2, t) {
@@ -5405,16 +6254,50 @@ function 密采样(点们, 步 = 4) {
 
 // 这条点列穿过了哪些**不相干**的框。
 // 源框和目标框排除 —— 线落在「脚本行」上，行在框内部，从框边进到那一行
-// 必然穿一小段自己的框，那是它该走的路（跟 _全测.js 里那条判据同一个口径）。
-function 撞了谁(点们, 框位, 自id, 到id) {
-  const 撞 = new Set();
+// 这条点列在每个框里各走了多长。
+//
+// ⚠️ 不能只判「碰没碰到」：源框和目标框是必然要碰的（口就长在框里），
+//    但「从边上进来 20px」和「横穿 300px」完全是两回事 —— 前者是它该走的路，
+//    后者就是使用者截图里骂的那件事。所以这里量的是**长度**，不是布尔值。
+const 避让步长 = 4;
+
+function 穿账(点们, 框位) {
+  const 账 = new Map();
+  for (const [x, y] of 点们) {
+    for (const [id, b] of 框位) {
+      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2)
+        账.set(id, (账.get(id) || 0) + 避让步长);
+    }
+  }
+  return 账;
+}
+
+// 穿框罚分：不相干的框一点都不能进（每 px 罚 1）；
+// 源框和目标框允许「出/入的那一小段」，超了才罚。
+// 乘 200 是为了让它**压过长度**：宁可绕远，也别横穿（Yeh 2009 DD-1 的优先级：
+// collision avoidance > flow direction > crossing > bends > length）。
+function 穿框罚分(点们, 框位, 自id, 到id) {
+  const 账 = 穿账(点们, 框位);
+  let 罚 = 0;
+  for (const [id, 米] of 账) {
+    const 容忍 = (id === 自id || id === 到id) ? 框内可忍 : 0;
+    if (米 > 容忍) 罚 += (米 - 容忍) * 200;
+  }
+  return 罚;
+}
+
+const 避让边距 = 16;
+
+// 一条点列有没有钻进**第三者的**框里（源框、目标框不算 —— 口就长在它们里面）。
+// 布尔 + 早停：一碰到就返回，不比「算了多少 px」那种贵。
+function 撞了第三框(点们, 框位, 自id, 到id) {
   for (const [x, y] of 点们) {
     for (const [id, b] of 框位) {
       if (id === 自id || id === 到id) continue;
-      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) 撞.add(id);
+      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) return true;
     }
   }
-  return 撞;
+  return false;
 }
 
 function 点列长度(点们) {
@@ -5423,10 +6306,10 @@ function 点列长度(点们) {
   return 长;
 }
 
-// 四种绕法：从障碍的上方 / 下方 / 左方 / 右方兜过去。
+// 几种绕法：从障碍的上方 / 下方 / 左方 / 右方兜过去。
 //
-// 只用**真撞到的那些框**算边界，不是全图 —— 拿全图包围盒会绕出去半张画布
-// （正交那版的实测教训：量出来宽 703 高 836）。四个都生成，交给调用方评分。
+// 只用**真挡路的那些框**算边界，不是全图 —— 拿全图包围盒会绕出去半张画布
+// （正交那版的实测教训：量出来宽 703 高 836）。全都生成，交给调用方按罚分+长度选。
 function 绕行候选(x1, y1, x2, y2, 障碍, 竖) {
   const 出 = [];
   if (!障碍 || !障碍.length) return 出;
@@ -5437,7 +6320,7 @@ function 绕行候选(x1, y1, x2, y2, 障碍, 竖) {
   }
   上 -= 避让边距; 下 += 避让边距; 左 -= 避让边距; 右 += 避让边距;
 
-  // 上下兜
+  // 上下兜（两端各自先竖直出去，再横向走）
   出.push([[x1, y1], [x1, 上], [x2, 上], [x2, y2]]);
   出.push([[x1, y1], [x1, 下], [x2, 下], [x2, y2]]);
   // 左右兜
@@ -5589,10 +6472,19 @@ function 画线() {
              中x: (r.left + r.width / 2 - 世界r.left) / z };
   };
 
+  // ══ 先收齐所有边，**一次**算路 ══
+  //
+  // 为什么不能一条一条算：绕障之外还有一件更要紧的事 —— **平行线不许重合**。
+  // 两条线并排走同一段时，读者分不出它们各自从哪来。
+  // 这件事只有「全图一起算」才能做（libavoid 的 nudge / 通道分离）。
+  // 我之前是每条线各算各的，四选一兜法，出来就是楼梯，所以看着丑。
+  //
+  // 端点推到**框边界**上：libavoid 的端点落进障碍里会直接退化成一刀直线（实测过）。
+  // 框里那一小段（行↔框边）留下来当 stub，单独画。
+  const 边们 = [];
   for (const 实 of 网.实例们) {
     const 源 = 框位.get(实.id);
     if (!源) continue;
-    // 每个出口记住它属于哪个脚本的第几个口 —— 那是线的落点
     const 出 = [];
     for (const s of 实.脚本 || [])
       for (let k = 0; k < (s.出口 || []).length; k++) {
@@ -5601,53 +6493,120 @@ function 画线() {
         if (!框位.has(出口.到)) continue;
         出.push({ s, k, 出口 });
       }
-    if (!出.length) continue;
-
-    for (let i = 0; i < 出.length; i++) {
-      const { s, k, 出口 } = 出[i];
+    for (const { s, k, 出口 } of 出) {
       const 的 = 框位.get(出口.到);
-
-      // 源点：这个脚本那一行右边第 k 个圆点。
-      // 找得到就用它 —— 这样箭头扎在哪一行，就是哪个脚本在伸手。
       const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || '').replace(/\[\d+\]$/, ''));
       const 源点们 = 源行 ? 源行.querySelectorAll('.脚本口 i') : null;
       const 源点 = 源点们 && 源点们[k] ? 源点们[k] : (源行 || null);
-
-      // 终点：目标框里挂着「到类型」那一行的左边。找不到这一行就不连线 ——
-      // 那种出口连的是 Unity 内置组件（Rigidbody / Renderer…），不是用户脚本，
-      // 交给下面的「组件空头」处理。
       const 目标行 = 行表.get(出口.到 + '\u0001' + String(出口.到类型 || ''));
-      if (!目标行) continue;
+      if (!目标行) continue;      // 连的是 Unity 内置组件，交给下面的组件口
 
       const a = 源点 ? 换算(源点) : null;
       const b = 换算(目标行);
       const 连 = 连哪边(源, 的);
-      // 方向要用**端点**算，不能用框算。
-      // 用框算得出「往右」，但起点取的是那一行的左边、终点在右边时，
-      // 曲线的控制点会朝右伸 —— 正好伸进自己框里，线从框内部穿出去（实测 Cube→enemy）。
-      const 往右 = a ? (b.中x >= a.中x) : 连.往右;
-      let x1, y1, x2, y2, 朝;
 
-      if (连.竖) {
-        x1 = a ? a.中x : Math.round(源.x + 源.w * ((i + 1) / (出.length + 1)));
-        y1 = a ? (连.往下 ? a.下 : a.上) : (连.往下 ? 源.y + 源.h : 源.y);
-        x2 = b.中x;
-        y2 = 连.往下 ? b.上 : b.下;
-        朝 = 连.往下 ? '下' : '上';
-      } else {
-        x1 = a ? (往右 ? a.右 : a.左) : 连.x1;
-        y1 = a ? a.中y : Math.round(源.y + 源.h / 2);
-        x2 = 往右 ? b.左 : b.右;
-        y2 = b.中y;
-        朝 = 往右 ? '右' : '左';
-      }
-      const d = 选走线(x1, y1, x2, y2, 框位, 实.id, 出口.到, 连.竖);
-      const p = 画一条(d, '#7a6a3f', 1.2, 实.id, 出口.到);
-      const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      t.textContent = (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
-      p.appendChild(t);
-      画箭头(x2, y2, '#7a6a3f', 实.id, 出口.到, 朝);
+      // 端点就放在**口上 / 目标行上**，不推到框边界。
+      //
+      // 试过推到边界（那样看起来更"干净"），结果绕成迷宫：
+      // enemy 的八个口都在框的右侧，目标 Cube 在左边，从「最近的边」出去之后
+      // 得横跨整张图才能绕到左边 —— 一圈一圈像迷宫，还更慢。
+      // 现在把源框和目标框从障碍里拿掉，线从口直接出发，只绕**第三个框**。
+      // 这正是 Unreal Blueprint / Blender 的做法：noodle 从 pin 长出来，穿过自己那个节点。
+      const 源心 = a ? { x: a.中x, y: a.中y } : { x: 源.x + 源.w / 2, y: 源.y + 源.h / 2 };
+      const 端心 = { x: b.中x, y: b.中y };
+      const 入边 = 最近边(端心, 的);
+
+      边们.push({
+        id: 实.id + '\u0002' + 出口.到 + '\u0002' + (s.名 || '') + '\u0002' + k,
+        自: 实.id, 到: 出口.到,
+        题: (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || ''),
+        源点: 源心, 终点: 端心,
+        朝: 入边.边 === '左' ? '左' : (入边.边 === '右' ? '右' : (入边.边 === '上' ? '上' : '下')),
+      });
     }
+  }
+
+  let 路由 = null;
+  // 拖动中不算全图路由 —— libavoid 一次要 130ms（32 条边 26 个障碍），
+  // 每帧调一次就是「拖着拖着卡成幻灯片」。拖动时先用直角折顶着，
+  // 松手（pointerup）会再画一次，那一次走完整算法。
+  // 这是编辑器里的常规做法：拖动降级，静止精确。
+  const 可算 = 边们.length && window.libavoided && !网.拖中;
+  if (可算) {
+    // 障碍 = 别的框。源框和目标框不算 —— 口就长在它们里面，不让穿等于自断起终点。
+    const 站边 = new Set(边们.flatMap(e => [e.自, e.到]));
+    try {
+      路由 = window.libavoided.routeEdges({
+        obstacles: [...框位].filter(([id]) => !站边.has(id))
+          .map(([id, b]) => ({ id, x: b.x, y: b.y, width: b.w, height: b.h })),
+        edges: 边们.map(e => ({ id: e.id, sourcePoint: e.源点, targetPoint: e.终点 })),
+      }, {
+        // 这些数字就是「好不好看」本身。
+        // ⚠️ 画法从直角折线改成曲线之后，bendPenalty 必须跟着降 ——
+        //    直角折线上每个拐弯都是一个刺眼的折点，罚得重是对的；
+        //    曲线拐弯本来就顺，再罚重它就会为了少拐一次而绕出去一大圈。
+        //    （实测 320 → 出图是满屏大回环）
+        obstacleMargin: 8,
+        edgeSpacing: 5,
+        bendPenalty: 70,
+        crossingPenalty: 60,
+        lengthPenalty: 1,
+      });
+    } catch (错) {
+      路由 = null;
+      console.warn('libavoid 走线失败，退回直连：', 错 && 错.message);
+    }
+  }
+  const 路表 = new Map();
+  if (路由 && Array.isArray(路由.edges)) {
+    for (const e of 路由.edges) {
+      const sec = e.sections && e.sections[0];
+      if (!sec) continue;
+      路表.set(e.id, [sec.startPoint, ...(sec.bendPoints || []), sec.endPoint]);
+    }
+  }
+
+  for (const e of 边们) {
+    const 路 = 路表.get(e.id);
+    // 原曲线（短、顺，就是 Unreal/Blender 那种 noodle）：起终点直连、控制点沿出口方向拉开
+    const 直路 = 密采样(曲线采样(e.源点.x, e.源点.y, e.终点.x, e.终点.y, false), 12);
+    const 直长 = 点列长度(直路);
+
+    let 点们 = 直路.map(p => ({ x: p[0], y: p[1] }));
+    // ⚠️ 这里只做布尔判断、而且用早停 —— 一开始写的是「算每条线在每个框里各走了多少 px」，
+    //    32 条线 × 两次 × 几百个采样点 × 26 个框，一次画线 561ms。
+    //    松手之后卡半秒，体感就是「拖完卡一下」。
+    const 直撞三 = 撞了第三框(直路, 框位, e.自, e.到);
+    if (直撞三 && 路 && 路.length >= 2) {
+      const 绕点 = 路.map(p => [p.x, p.y]);
+      const 绕长 = 点列长度(绕点);
+      // 绕行短于 1.6 倍才值得：绕成两倍还不如让线直一点（Unreal 的线本来就穿节点）。
+      if (绕长 < 直长 * 1.6) 点们 = 绕点.map(p => ({ x: p[0], y: p[1] }));
+    }
+    // 兜底：libavoid 没算出结果时也画，不能没线
+    if (!点们 || 点们.length < 2) {
+      点们 = [e.源点, { x: e.终点.x, y: e.源点.y }, e.终点];
+    }
+    // 相邻重合点去掉，否则圆角会算出 NaN
+    const 清 = [];
+    for (const p of 点们) {
+      const 末 = 清[清.length - 1];
+      if (!末 || Math.abs(末.x - p.x) > 0.01 || Math.abs(末.y - p.y) > 0.01) 清.push(p);
+    }
+    // ⚠️ 不能画成直角折线 —— 那是我第一版干的事，出来像电路板。
+    //
+    // 业内好看的那几家（Unreal Blueprint / Blender / Shader Graph / ComfyUI）
+    // 画的全是**曲线**。而避让正确的那套（libavoid）算出来的是**正交折线**。
+    // 两者不冲突：正交折线是「轨道」，曲线是「外观」——
+    //   "Curved: interpolate smooth curves through orthogonal waypoints"
+    //   "All edge styles share the same upstream routing logic through the orthogonal path builder"
+    // 所以：轨道定去哪儿，Catmull-Rom 把它揉顺。
+    const d = 样条成路(清.map(p => [p.x, p.y]));
+    const p = 画一条(d, '#7a6a3f', 1.2, e.自, e.到);
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    t.textContent = e.题;
+    p.appendChild(t);
+    画箭头(e.终点.x, e.终点.y, '#7a6a3f', e.自, e.到, e.朝);
   }
 
 
