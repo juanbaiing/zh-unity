@@ -315,6 +315,13 @@
   .空头框.误报 .实例名{color:var(--字3)!important;font-weight:400}
   .空头框.误报 .实例签{color:var(--字4)!important;background:transparent}
   .空头框.误报 .实例脚{color:var(--字4)!important}
+  /* 悬停一个框：只留跟它有关的那几根线，其余压到接近底色。
+     线一多，任何走线算法都救不了 —— 一次只看一束才行。
+     这个比你之前提的「整体保留但半透明」更激进一点：只点亮一束，其余几乎消失。 */
+  #线层 path.暗{opacity:0.05!important}
+  #线层 path.亮{opacity:1!important;stroke-width:2}
+  #网层 .实例框.暗{opacity:0.16}
+
   /* 右键菜单 */
   .右键单{position:fixed;z-index:9000;min-width:200px;padding:4px;border-radius:6px;
     background:var(--panel);border:1px solid var(--line);box-shadow:0 8px 24px #0009;
@@ -2457,6 +2464,9 @@ function 建孤岛框(孤) {
     document.addEventListener('pointerup', 停);
   });
 
+  // 悬停 = 只看这一束
+  el.addEventListener('mouseenter', () => 点亮(孤.id));
+  el.addEventListener('mouseleave', 熄灭);
   网.层.appendChild(el);
 }
 
@@ -2542,6 +2552,9 @@ function 建空头框(空) {
     document.addEventListener('pointerup', 停);
   });
 
+  // 悬停 = 只看这一束
+  el.addEventListener('mouseenter', () => 点亮(空.自));
+  el.addEventListener('mouseleave', 熄灭);
   网.层.appendChild(el);
 }
 
@@ -2831,7 +2844,82 @@ function 建实例框(实) {
     头.addEventListener('pointerup', 停);
   });
 
+  // 悬停 = 只看这一束
+  el.addEventListener('mouseenter', () => 点亮(实.id));
+  el.addEventListener('mouseleave', 熄灭);
   网.层.appendChild(el);
+}
+
+// ── 走线 ────────────────────────────────────────────────
+//
+// 只走横平竖直，绕开挡路的框。
+//
+// 为什么正交：曲线绕过框时曲率大的地方会跟框的边界糊在一起，
+// 看着像「线连到了那个框上」—— 学术里管这叫 edge ambiguity
+// （Ambiguity-Free Edge-Bundling, TVCG：线重叠在不相关节点上会让人误判连接关系）。
+// Unreal 的 Gridline Blueprints 就是「正交 + 节点避让 + 线间距」三件套，
+// 这里抄前两件，线间距用「起点按框高散开」顶上。
+function 竖段干净(x, 上, 下, 框位, 自id, 到id) {
+  const 留 = 12;
+  for (const [id, b] of 框位) {
+    if (id === 自id || id === 到id) continue;
+    if (x > b.x - 留 && x < b.x + b.w + 留 && 下 > b.y - 留 && 上 < b.y + b.h + 留) return false;
+  }
+  return true;
+}
+
+// 从 (x1,y1) 到 (x2,y2) 的一条正交折线。
+// 中间竖段从正中往两边试，取第一个不穿过别的框的位置 —— 找不到就用正中。
+//
+// ⚠️ 两个方向都得能走。原来只会「源右 → 目标左」，碰上目标在左边就硬绕一个大回环
+//    （实测绕到画布顶部横跨半张图），丑而且根本跟不住。现在调用方按目标方向选出口边，
+//    这里只负责在两点之间找一条干净的竖段。
+function 正交路(x1, y1, x2, y2, 框位, 自id, 到id) {
+  const 左 = Math.min(x1, x2), 右 = Math.max(x1, x2);
+  const 上 = Math.min(y1, y2), 下 = Math.max(y1, y2);
+
+  // 两点横向几乎重合：没地方放竖段，先竖后横（Unreal「竖段侧移」的简化版）
+  if (右 - 左 < 28) return `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
+
+  const 中 = (x1 + x2) / 2;
+  let mx = 中;
+  if (!竖段干净(中, 上, 下, 框位, 自id, 到id)) {
+    for (let k = 1; k <= 20; k++) {
+      const a = 中 - k * 28, b = 中 + k * 28;
+      if (a > 左 + 14 && 竖段干净(a, 上, 下, 框位, 自id, 到id)) { mx = a; break; }
+      if (b < 右 - 14 && 竖段干净(b, 上, 下, 框位, 自id, 到id)) { mx = b; break; }
+    }
+  }
+  return `M ${x1} ${y1} L ${mx} ${y1} L ${mx} ${y2} L ${x2} ${y2}`;
+}
+
+// 悬停一个框：只留跟它有关的那几根线。
+// 一次只看一束 —— 这比任何走线算法都管用。
+function 点亮(id) {
+  const 层 = 网.线层;
+  if (!层 || !id) return;
+  const 相关 = new Set([id]);
+  for (const p of 层.querySelectorAll('path[data-自]')) {
+    const 自 = p.dataset.自, 到 = p.dataset.到;
+    if (自 === id || 到 === id) {
+      相关.add(自); 相关.add(到);
+      p.classList.add('亮'); p.classList.remove('暗');
+    } else {
+      p.classList.add('暗'); p.classList.remove('亮');
+    }
+  }
+  // 挂在它身上的空头框也算「有关」—— 那是它缺的东西
+  for (const 空 of 网.空头们 || []) if (空.自 === id) 相关.add(空.id);
+  for (const f of 网.层.querySelectorAll('.实例框')) {
+    f.classList.toggle('暗', !!f.dataset.id && !相关.has(f.dataset.id));
+  }
+}
+
+function 熄灭() {
+  const 层 = 网.线层;
+  if (!层) return;
+  for (const p of 层.querySelectorAll('path[data-自]')) p.classList.remove('暗', '亮');
+  for (const f of 网.层.querySelectorAll('.实例框')) f.classList.remove('暗');
 }
 
 // 线：从出口点连到目标实例框的左边。
@@ -2846,61 +2934,82 @@ function 画线() {
       w: el.offsetWidth, h: el.offsetHeight });
   }
 
+  const 画一条 = (d, 颜色, 粗, 自, 到, 虚线) => {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 颜色);
+    p.setAttribute('stroke-width', 粗);
+    p.setAttribute('stroke-linejoin', 'round');
+    if (虚线) p.setAttribute('stroke-dasharray', 虚线);
+    p.setAttribute('opacity', '0.8');
+    if (自) p.dataset.自 = 自;
+    if (到) p.dataset.到 = 到;
+    层.appendChild(p);
+    return p;
+  };
+  const 画箭头 = (x, y, 颜色, 自, 到, 朝左) => {
+    const h = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    h.setAttribute('d', 朝左 ? `M ${x} ${y} l 8 -4 l 0 8 z` : `M ${x} ${y} l -8 -4 l 0 8 z`);
+    h.setAttribute('fill', 颜色);
+    if (自) h.dataset.自 = 自;
+    if (到) h.dataset.到 = 到;
+    层.appendChild(h);
+  };
+
   for (const 实 of 网.实例们) {
     const 源 = 框位.get(实.id);
     if (!源) continue;
-    let 用 = 0;
-    for (const s of 实.脚本 || []) {
+    // 先把出口归拢，才知道该把起点分几份
+    const 出 = [];
+    for (const s of 实.脚本 || [])
       for (const 出口 of s.出口 || []) {
         if (!出口.到 || 出口.到 === 实.id) continue;
-        const 的 = 框位.get(出口.到);
-        if (!的) continue;
-        // 起点：框右边，按出口顺序往下排一点，免得全堆在一个点上
-        const y1 = 源.y + 实例头高 + 16 + (用 % 6) * 12;
-        const x1 = 源.x + 源.w;
-        // 终点：目标框左边，往中间靠
-        const y2 = 的.y + 的.h / 2;
-        const x2 = 的.x;
-        const mx = (x1 + x2) / 2;
-        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        p.setAttribute('d', `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
-        p.setAttribute('fill', 'none');
-        p.setAttribute('stroke', '#7a6a3f');
-        p.setAttribute('stroke-width', '1.2');
-        p.setAttribute('opacity', '0.8');
-        层.appendChild(p);
-        const 头 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        头.setAttribute('d', `M ${x2} ${y2} l -8 -4 l 0 8 z`);
-        头.setAttribute('fill', '#7a6a3f');
-        层.appendChild(头);
-        用++;
+        if (!框位.has(出口.到)) continue;
+        出.push(出口);
       }
+    if (!出.length) continue;
+
+    // 起点按框高平分，不是固定 6 个槽。
+    // 原来是 (用 % 6) * 12 —— 十条线挤进 72px，一出框就分不清哪根是哪根。
+    const 可用 = Math.max(16, 源.h - 实例头高 - 30);
+    const 间距 = 出.length > 1 ? Math.min(15, 可用 / (出.length - 1)) : 0;
+    const 起 = 源.y + 实例头高 + 16 + Math.max(0, (可用 - 间距 * (出.length - 1)) / 2);
+
+    for (let i = 0; i < 出.length; i++) {
+      const 出口 = 出[i];
+      const 的 = 框位.get(出口.到);
+      // 按目标在左还是在右，选从源框哪一边出去。
+      // 永远从右边出去的话，目标在左的线只能绕大回环 —— 那才是最难跟的那种线。
+      const 往右 = (的.x + 的.w / 2) >= (源.x + 源.w / 2);
+      const x1 = 往右 ? 源.x + 源.w : 源.x;
+      const y1 = Math.round(起 + i * 间距);
+      const x2 = 往右 ? 的.x : 的.x + 的.w;
+      const y2 = Math.round(的.y + 的.h / 2);
+      const d = 正交路(x1, y1, x2, y2, 框位, 实.id, 出口.到);
+      const p = 画一条(d, '#7a6a3f', 1.2, 实.id, 出口.到);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      t.textContent = (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || '');
+      p.appendChild(t);
+      画箭头(x2, y2, '#7a6a3f', 实.id, 出口.到, !往右);
     }
   }
 
   // 人指定的线：你在空头框上右键说「它其实连到谁」。
   // 用虚线画 —— 扫描出来的那些是事实，这条是你说的，得一眼分得开。
-  for (const 线 of 网.人线们 || []) {    const 源 = 框位.get(线.自);
+  for (const 线 of 网.人线们 || []) {
+    const 源 = 框位.get(线.自);
     const 的 = 框位.get(线.到);
     if (!源 || !的) continue;
-    const x1 = 源.x + 源.w, y1 = 源.y + 实例头高 + 8;
-    const x2 = 的.x, y2 = 的.y + 的.h / 2;
-    const mx = (x1 + x2) / 2;
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('d', `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
-    p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', '#6fb98d');
-    p.setAttribute('stroke-width', '1.4');
-    p.setAttribute('stroke-dasharray', '6 4');
-    p.setAttribute('opacity', '0.85');
+    const 往右 = (的.x + 的.w / 2) >= (源.x + 源.w / 2);
+    const x1 = 往右 ? 源.x + 源.w : 源.x, y1 = 源.y + 实例头高 + 10;
+    const x2 = 往右 ? 的.x : 的.x + 的.w, y2 = 的.y + 的.h / 2;
+    const d = 正交路(x1, y1, x2, y2, 框位, 线.自, 线.到);
+    const p = 画一条(d, '#6fb98d', 1.4, 线.自, 线.到, '6 4');
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
     t.textContent = '你指定的连接：' + (线.说明 || '');
     p.appendChild(t);
-    层.appendChild(p);
-    const 头 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    头.setAttribute('d', `M ${x2} ${y2} l -8 -4 l 0 8 z`);
-    头.setAttribute('fill', '#6fb98d');
-    层.appendChild(头);
+    画箭头(x2, y2, '#6fb98d', 线.自, 线.到, !往右);
   }
 
   // 空头：从源实例伸出去，到那个空框为止。
