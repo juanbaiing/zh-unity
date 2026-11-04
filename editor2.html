@@ -184,6 +184,8 @@
   .blk[data-t="字段"],.blk[data-t="属性"],.blk[data-t="数组"],.blk[data-t="新建列表"]{border-left-color:var(--kdata)}
   .blk.容器{background:var(--脚)}
   .blk.dragging{opacity:.85;z-index:999}
+  /* 「这个块就是出错的那一行」—— 点错误时闪一下，不用自己数第几行 */
+  .blk.闪{box-shadow:0 0 0 2px var(--选), 0 0 0 4px rgba(120,150,220,.28)}
   .blk.孤岛{border-color:var(--bad);border-left-color:var(--bad)}
 
   /* 头不换行 —— 字段块有 5 个格子，一换行整个块就变两行高，
@@ -552,6 +554,17 @@
   .codelines .ln.warn2{background:#221d14}
   .codelines .ln.warn2 .tx{color:#c8a860}
   .codelines .ln.闪{background:var(--选)}
+  /* VS 那种红波浪线：只压住出错那一小段，不是整行。
+     整行变色留给「这一行有问题」，波浪线回答「这几个字符有问题」。 */
+  .codelines .ln .tx .浪{
+    text-decoration:underline wavy #c85656;
+    text-decoration-thickness:1.5px;
+    text-underline-offset:3px;
+    cursor:help;
+  }
+  .codelines .ln.warn2 .tx .浪{
+    text-decoration-color:#c8a860;
+  }
 
   .errcount{float:right;font-size:var(--字标);color:var(--dim)}
   .errcount.有错{color:var(--bad)}
@@ -2290,6 +2303,17 @@ function 输出() {
   try { 中间 = 树.生成(根块们); } catch (e) { 中间 = '// 生成失败：' + e.message; }
   画行(中, 中间);
 
+  // 「第几行是哪个块生成的」—— 编译报错只给行号，靠这张表翻回块。
+  // ⚠️ 表是按**中文行**记的，而编译报错是 **C# 行**。
+  //    两边行数必须一样才谈得上对应：中间层和 C# 都是 画行() 一行的产物，
+  //    加行/减行会整体错位。对不上就在控制台喊一声，别默默错。
+  当前行区 = (树.生成 && 树.生成.行区) || new Map();
+  const 中行数 = String(中间 || '').split(String.fromCharCode(10)).filter((s, i, a) => !(i === a.length - 1 && s === '')).length;
+  const 尖行数 = String(代码 || '').split(String.fromCharCode(10)).filter((s, i, a) => !(i === a.length - 1 && s === '')).length;
+  if (中行数 !== 尖行数 && 当前行区.size) {
+    console.warn('[行号对不上] 中文 ' + 中行数 + ' 行 / C# ' + 尖行数 + ' 行 —— 点错误跳块会跳歪');
+  }
+
   画行(out, 代码);
   标错行();
 
@@ -2306,6 +2330,9 @@ function 输出() {
 
 // ---------------- 真编译检查（像 VS 那样报） ----------------
 let 编译结果 = [];        // [{严重, 行, 列, 码, 说}]
+// 块 id → 它在生成结果里占的行区间 [起, 止]（0 基）。
+// 生成器每跑一次就重填一次，见 blocks2.js 的 生成.行区。
+let 当前行区 = new Map();
 let 检查定时 = 0;
 
 function 排编译检查() {
@@ -2322,13 +2349,14 @@ function 排编译检查() {
 
 function 标错行() {
   const 行们 = out.querySelectorAll('.ln');
-  行们.forEach(l => l.classList.remove('bad', 'warn2'));
+  行们.forEach(l => { l.classList.remove('bad', 'warn2'); 还原浪(l); });
   let 错数 = 0, 警数 = 0;
   for (const e of 编译结果) {
     const l = out.querySelector('.ln[data-行="' + e.行 + '"]');
     if (!l) continue;
-    if (e.严重 === '错误') { l.classList.add('bad'); 错数++; }
-    else { l.classList.add('warn2'); 警数++; }
+    l.classList.add(e.严重 === '错误' ? 'bad' : 'warn2');
+    if (e.严重 === '错误') 错数++; else 警数++;
+    画浪(l, e);
   }
   const 条 = document.getElementById('errCount');
   if (条) {
@@ -2348,9 +2376,70 @@ function 标错行() {
     const 位 = document.createElement('span'); 位.className = '位'; 位.textContent = e.行 + ':' + e.列;
     const 说 = document.createElement('span'); 说.className = '说'; 说.textContent = e.说;
     项.appendChild(码); 项.appendChild(位); 项.appendChild(说);
-    项.addEventListener('click', () => 跳行(e.行));
+    // 点一条错误 → 滚到那行 + 闪 + 把生成这行的块也点亮。
+    // 光滚代码是 VS 的前半截，后半截是「它是我画的那一块」——不然还得自己数。
+    项.addEventListener('click', () => {
+      跳行(e.行);
+      const id = 块在行(e.行);
+      if (id) 亮块(id);
+    });
     板.appendChild(项);
   }
+}
+
+// 这一行是哪个块生成的？取包含它的**最小**范围（子块比父块小，越往里越准）。
+function 块在行(行号) {
+  const 区 = 当前行区;
+  if (!区 || !区.size) return '';
+  let 最 = '', 最小 = Infinity;
+  for (const [id, [起, 止]] of 区) {
+    if (行号 < 起 + 1 || 行号 > 止 + 1) continue;   // 行区是 0 基，行号是 1 基
+    const 宽 = 止 - 起;
+    if (宽 < 最小) { 最小 = 宽; 最 = id; }
+  }
+  return 最;
+}
+
+// 把错误那一小段画成波浪线（VS 的红波）。
+// 编译器只给起点列，不给长度 —— 往后吃到标识符结束；
+// 取不到标识符就吃到行尾（去掉末尾空白）。整行都画就太吵了。
+function 画浪(行元素, e) {
+  const 字 = 行元素.querySelector('.tx');
+  if (!字 || 字.dataset.原 === undefined) {
+    if (字) 字.dataset.原 = 字.textContent;
+  }
+  const 原 = 字.dataset.原 === undefined ? 字.textContent : 字.dataset.原;
+  字.textContent = 原;
+
+  const 从 = Math.max(0, (e.列 || 1) - 1);
+  if (从 >= 原.length) return;
+  let 长 = (原.slice(从).match(/^[A-Za-z0-9_$.]+/) || [''])[0].length;
+  if (!长) 长 = 原.slice(从).trimEnd().length || 1;
+
+  字.textContent = '';
+  const 前 = document.createElement('span'); 前.textContent = 原.slice(0, 从);
+  const 中 = document.createElement('span'); 中.className = '浪'; 中.textContent = 原.slice(从, 从 + 长);
+  中.title = e.码 + '　' + e.说;
+  const 后 = document.createElement('span'); 后.textContent = 原.slice(从 + 长);
+  字.appendChild(前); 字.appendChild(中); 字.appendChild(后);
+}
+
+function 还原浪(行元素) {
+  const 字 = 行元素.querySelector('.tx');
+  if (!字 || 字.dataset.原 === undefined) return;
+  字.textContent = 字.dataset.原;
+  delete 字.dataset.原;
+}
+
+// 把某个块亮一下 —— 它可能在窗户里，也可能压根没开窗（那时就算了）。
+// ⚠️ 不用 scrollIntoView：块在带 transform 的画布里，不是滚动容器，滚了等于没滚。
+function 亮块(id) {
+  const 布 = 窗.内 || 世界;
+  const b = 布 && 布.querySelector('.blk[data-id="' + CSS.escape(String(id)) + '"]');
+  if (!b) return;
+  b.classList.add('闪');
+  setTimeout(() => b.classList.remove('闪'), 1200);
+  return !!b;
 }
 
 function 跳行(n) {
@@ -4832,9 +4921,12 @@ function 开窗(实例el, 脚本名) {
     //    只把偏移写成 {边, 边} 就等于「把 x=1000 的块放到屏幕 x=12」，照样在窗外。
     //    开出来的窗一片黑，看着像「块没了」，其实是视野没对准内容。
     //    要把包围盒左上角搬到 (边, 边)：屏幕上 内视.x + 块x×z = 边。
-    //    内视.x 是屏幕像素，而 --内x 用的是它除过 外z 的 CSS 值，所以这里乘回去。
-    const 外z = 视.z || 1;
-    窗.内视 = { x: (边 - 左 * 真z) * 外z, y: (边 - 上 * 真z) * 外z, z: 真z };
+    // ⚠️ 只乘这一次。内视.x/y 记的是**屏幕像素**，应用内视() 里写 --内x 时才除回 外z
+    //    （因为 #窗内 在外层 scale(视.z) 里面，CSS 值会被放大一次）。
+    //    这里再乘一遍 外z 就多乘了：外层缩到 60% 时，块的左上角只挪到应有的 60% 位置，
+    //    剩下的被窗户左边缘裁掉 —— 表现就是「一开窗，块有一半压在侧栏底下」。
+    //    ⚠️ 外z=1 时两种写法一样，所以这个错只在缩放过之后才露出来。
+    窗.内视 = { x: 边 - 左 * 真z, y: 边 - 上 * 真z, z: 真z };
     应用内视();
   });
 }
