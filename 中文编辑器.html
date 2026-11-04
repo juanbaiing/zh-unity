@@ -424,8 +424,15 @@
   /* 左边栏的脚本索引 */
   #脚本索引{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;
     max-height:42%;overflow:auto}
+  /* 头是可以点的：点一下把整列收起来 / 放出来。
+     脚本一多，这一列能占掉半条边栏，而它是「找东西」用的，不是「常看」用的。 */
   .索引头{font-size:var(--字标);color:var(--字4);padding:0 4px 4px;
-    display:flex;justify-content:space-between}
+    display:flex;justify-content:space-between;align-items:center;
+    cursor:pointer;user-select:none;border-radius:4px}
+  .索引头:hover{color:var(--字2);background:var(--脚)}
+  .索引头 .折{display:inline-block;transition:transform .12s;margin-right:5px}
+  .索引头.收 .折{transform:rotate(-90deg)}
+  #脚本索引.收 .索引项{display:none}
   .索引项{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:4px;
     font-size:var(--字标);color:#6f8aa3;cursor:pointer;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
@@ -434,6 +441,22 @@
     overflow:hidden;text-overflow:ellipsis}
   .索引项.孤{color:var(--bad)}
   .索引空{font-size:var(--字标);color:var(--字4);padding:2px 6px}
+
+  /* 边栏悬停小卡。
+     不用原生 title —— 那个要等一秒、不能排版、样式改不了，而且只一行。
+     这里自己做：鼠标一压上去就出，能分几行说清楚「这是什么 / 挂在哪 / 伸到哪」。 */
+  .悬停卡{position:fixed;z-index:9600;max-width:300px;padding:7px 10px 8px;
+    border-radius:6px;background:var(--panel);border:1px solid var(--line);
+    box-shadow:0 6px 22px #0008;pointer-events:none;
+    font-size:var(--字标);line-height:1.55;color:var(--字3)}
+  .悬停卡 .题{color:var(--字1);font-size:var(--字正文);margin-bottom:3px}
+  .悬停卡 .行{display:flex;gap:6px}
+  .悬停卡 .键{color:var(--字4);flex:0 0 auto}
+  .悬停卡 .值{color:var(--字2);word-break:break-all}
+  .悬停卡 .坏{color:var(--bad)}
+  .悬停卡 .好{color:#7fb08c}
+  .悬停卡 .注{color:var(--字4);margin-top:4px;padding-top:4px;
+    border-top:1px solid var(--line)}
   .网提示{position:absolute;left:40px;top:12px;padding:8px 12px;border-radius:4px;
     background:var(--panel);color:var(--dim);font-size:var(--字正文);
     border:1px solid var(--line);z-index:50;pointer-events:none}
@@ -5890,6 +5913,58 @@ function 画申诉区() {
   盒.appendChild(说);
 }
 
+// ── 边栏悬停小卡 ──────────────────────────────────────────
+//
+// 不用原生 title：那个要等一秒才出来、只一行、样式改不了。
+// 这里自己画一张卡，鼠标压上去立刻出，能分几行说清楚：
+// 这个脚本挂在谁身上、往外伸几个口、分别伸到哪、有没有连到 Unity 组件的。
+let 悬停卡El = null;
+let 悬停计时 = null;
+
+function 关悬停卡() {
+  if (悬停计时) { clearTimeout(悬停计时); 悬停计时 = null; }
+  if (悬停卡El) { 悬停卡El.remove(); 悬停卡El = null; }
+}
+
+// 内容由调用方给：一串 {键, 值, 坏?} 和一行注
+function 开悬停卡(锚, 题, 行们, 注) {
+  关悬停卡();
+  const 卡 = document.createElement('div');
+  卡.className = '悬停卡';
+  const 题el = document.createElement('div');
+  题el.className = '题';
+  题el.textContent = 题;
+  卡.appendChild(题el);
+  for (const r of 行们) {
+    const 行 = document.createElement('div');
+    行.className = '行';
+    const 键 = document.createElement('span');
+    键.className = '键';
+    键.textContent = r.键;
+    const 值 = document.createElement('span');
+    值.className = '值' + (r.坏 ? ' 坏' : '');
+    值.textContent = r.值;
+    行.appendChild(键); 行.appendChild(值);
+    卡.appendChild(行);
+  }
+  if (注) {
+    const 注el = document.createElement('div');
+    注el.className = '注';
+    注el.textContent = 注;
+    卡.appendChild(注el);
+  }
+  document.body.appendChild(卡);
+  悬停卡El = 卡;
+  // 摆在鼠标右边；右边放不下就翻到左边
+  const r = 锚.getBoundingClientRect();
+  const 卡r = 卡.getBoundingClientRect();
+  let x = r.right + 8, y = r.top;
+  if (x + 卡r.width > innerWidth - 8) x = Math.max(8, r.left - 卡r.width - 8);
+  if (y + 卡r.height > innerHeight - 8) y = Math.max(8, innerHeight - 卡r.height - 8);
+  卡.style.left = x + 'px';
+  卡.style.top = y + 'px';
+}
+
 // 左边栏的「所有脚本」索引。点一下把视野对准那个框 ——
 // 11 个脚本散在画布上，靠眼睛找太费劲。
 function 画脚本索引() {
@@ -5897,9 +5972,14 @@ function 画脚本索引() {
   if (!盒) return;
   盒.textContent = '';
   const 头 = document.createElement('div');
-  头.className = '索引头';
+  头.className = '索引头' + (盒.classList.contains('收') ? ' 收' : '');
   const 数 = (网.实例们.reduce((n, 实) => n + (实.脚本 || []).length, 0)) + (网.孤岛们 || []).length;
-  头.innerHTML = '<span>所有脚本</span><span>' + 数 + '</span>';
+  头.innerHTML = '<span><span class="折">▾</span>所有脚本</span><span>' + 数 + '</span>';
+  头.title = (盒.classList.contains('收') ? '点一下展开' : '点一下收起') + '这一列';
+  头.addEventListener('click', () => {
+    盒.classList.toggle('收');
+    画脚本索引();
+  });
   盒.appendChild(头);
   if (!数) {
     const 空 = document.createElement('div');
@@ -5911,7 +5991,6 @@ function 画脚本索引() {
   const 加 = (名, 挂谁, 孤, id) => {
     const 项 = document.createElement('div');
     项.className = '索引项' + (孤 ? ' 孤' : '');
-    项.title = 孤 ? (名 + '（无人挂载）') : (名 + ' → ' + 挂谁);
     const 字 = document.createElement('span');
     字.textContent = 名;
     项.appendChild(字);
@@ -5920,6 +5999,36 @@ function 画脚本索引() {
     尾.textContent = 孤 ? '✗ 无人挂载' : 挂谁;
     项.appendChild(尾);
     项.addEventListener('click', () => 对准目标(id));
+    // 悬停小卡：说清楚挂在哪、伸到哪、有没有伸空的
+    项.addEventListener('mouseenter', () => {
+      悬停计时 = setTimeout(() => {
+        悬停计时 = null;
+        const 实 = (网.实例们 || []).find(x => x.id === id);
+        const sc = 实 ? (实.脚本 || []).find(x => x.名 === 名) : null;
+        const 行们 = [];
+        if (孤) {
+          行们.push({ 键: '挂载', 值: '没有人挂它 —— Unity 不会调用它', 坏: true });
+        } else if (实) {
+          行们.push({ 键: '挂在', 值: (实.名 || 实.id) });
+        }
+        const 出口们 = (sc && sc.出口) || [];
+        if (出口们.length) {
+          const 有效 = 出口们.filter(e => e.到);
+          const 空口 = 出口们.length - 有效.length;
+          行们.push({ 键: '往外伸', 值: 有效.length + ' 个' + (空口 ? '（另有 ' + 空口 + ' 个连到 Unity 组件）' : '') });
+          const 名字们 = [...new Set(有效.map(e => {
+            const 目标 = (网.实例们 || []).find(x => x.id === e.到);
+            return (目标 ? 目标.名 || 目标.id.split('.').pop() : String(e.到).split('.').pop()) + '.' + (e.到类型 || '?');
+          }))];
+          if (名字们.length) 行们.push({ 键: '连到', 值: 名字们.slice(0, 5).join('、') + (名字们.length > 5 ? ' 等 ' + 名字们.length + ' 处' : '') });
+        } else if (sc) {
+          行们.push({ 键: '往外伸', 值: '没有出口 —— 它不叫别人' });
+        }
+        if (!sc && !孤) 行们.push({ 键: '注意', 值: '这个实例上找不到同名脚本', 坏: true });
+        开悬停卡(项, 名, 行们, '点一下 → 视野对准它');
+      }, 220);   // 压住一小会儿才出，划过去的时候不要一路弹
+    });
+    项.addEventListener('mouseleave', 关悬停卡);
     盒.appendChild(项);
   };
   for (const 实 of 网.实例们) for (const sc of 实.脚本 || []) 加(sc.名, 实.名, false, 实.id);
