@@ -245,7 +245,9 @@
   .实例体{padding:8px;display:flex;flex-direction:column;gap:4px}
   .脚本框{background:var(--脚);border-radius:4px}
   .脚本名{display:flex;align-items:center;justify-content:space-between;gap:8px;
-    padding:6px 10px;color:#6f8aa3;font-size:var(--字正文);white-space:nowrap}
+    padding:6px 10px;color:#6f8aa3;font-size:var(--字正文);white-space:nowrap;cursor:pointer}
+  .脚本名:hover{background:color-mix(in srgb, #6f8aa3 12%, transparent)}
+  .脚本框.开>.脚本名{color:var(--字1)}
   .脚本口{display:flex;gap:4px}
   .脚本口 i{width:6px;height:6px;border-radius:50%;border:1px solid #7a6a3f;display:block}
   .实例脚{padding:4px 12px;color:var(--字4);font-size:var(--字标);
@@ -253,6 +255,12 @@
   .网提示{position:absolute;left:40px;top:12px;padding:8px 12px;border-radius:4px;
     background:var(--panel);color:var(--dim);font-size:var(--字正文);
     border:1px solid var(--line);z-index:50;pointer-events:none}
+  /* 窗户：脚本框张开后露出来的那块独立画布。
+     它在关系网里面被裁着 —— 网还在，只是这一格里自己一套缩放平移。 */
+  .窗户{position:relative;margin:8px 0 0;background:var(--槽);
+    border:1px dashed var(--line);border-radius:4px;height:420px;overflow:hidden}
+  .内世界{position:absolute;left:0;top:0;transform-origin:0 0;
+    transform:translate(var(--内x,0px),var(--内y,0px)) scale(var(--内z,1))}
 
   .palette.回收{background:var(--错底);box-shadow:inset 0 0 0 2px #ff6b6b66}
   .palette.回收::after{content:'松手删掉';position:absolute;left:12px;bottom:12px;
@@ -440,6 +448,10 @@ addEventListener('pointerup', () => {
 
 // 把视野对准所有块 —— 换工程、整理完之后用
 function 对准块() {
+  // 开着窗户的时候别动外层视野。切工程会顺手调一次对准块，
+  // 那一下把外层缩放重新算掉了 —— 窗户刚按屏幕比例算好的尺寸就白算了
+  // （实测：开窗时 视.z=2，被重置回 0.5，窗户屏幕上从 644 掉到 161）。
+  if (窗 && 窗.el) return;
   // 块和实例框在同一张画布上，一起算包围盒 —— 只量块的话，打开时视野对准块，
   // 实例框全在视野外面，看着像「网没出来」。
   const 块们 = [...世界.querySelectorAll('.blk, .实例框')].filter(el => el.offsetParent);
@@ -854,7 +866,7 @@ function 布局(根们) {
   const 头高 = new Map();
   const 段头高 = new Map();
   const 叶 = new Map();
-  for (const el of 世界.querySelectorAll('.blk')) {
+  for (const el of (当前画布 || 世界).querySelectorAll('.blk')) {
     const id = Number(el.dataset.id);
     const 头 = el.querySelector(':scope > .head');
     // ⚠️ 一律用 offsetWidth/offsetHeight，**不能**用 getBoundingClientRect。
@@ -912,7 +924,7 @@ function 布局(根们) {
   刷顺序(根们, 世界);
 
   // 尺寸算完，写回各内容区
-  for (const el of 世界.querySelectorAll('.blk')) {
+  for (const el of (当前画布 || 世界).querySelectorAll('.blk')) {
     const b = 图.get(Number(el.dataset.id));
     if (!b) continue;
     const 主 = el.querySelector(':scope > .body');
@@ -1601,7 +1613,11 @@ function 重画(跳过重叠整理) {
   const 提示 = document.getElementById('hintEmpty');
   if (提示) 提示.style.display = 根块们.length ? 'none' : 'block';
 
-  for (const b of 根块们) 世界.appendChild(渲染块(b));
+  // 块画在哪：开了窗户就画进窗户；
+  // 有网但没开窗就**不画** —— 关系网才是默认界面，块是窗户里的内容；
+  // 没有网（浏览器直接打开、拉不到数据）就退回老样子摊在 #world 上，别让人对着白屏。
+  const 布 = 当前画布 || (网.开 ? null : 世界);
+  if (布) for (const b of 根块们) 布.appendChild(渲染块(b));
   标孤岛();
   布局(根块们);
   // 尺寸定了才知道谁真的压住谁 —— 这一步必须在 布局() 之后。
@@ -2061,6 +2077,11 @@ if (有壳()) {
 document.getElementById('undoBtn').onclick = () => 撤销();
 document.getElementById('redoBtn').onclick = () => 重做();
 
+// 块画在哪个容器里。
+// 平时是最外层的 #world；张开了窗户就画进那扇窗 ——
+// 块编辑器本来就是窗户里的内容，不是和实例框并列的另一样东西。
+let 当前画布 = null;   // null = 用 世界
+
 // ══════════════════════════════════════════════════════════════
 // 网层：Unity 场景里的实例
 //
@@ -2167,6 +2188,14 @@ function 建实例框(实) {
       }
       行.appendChild(点们);
     }
+    // 点脚本名 = 张开这扇窗。窗口只在够大的时候才开（见 够大()）
+    框.dataset.名 = s.名 || '';
+    行.title = '点开这个脚本的块';
+    行.addEventListener('click', e => {
+      e.stopPropagation();
+      开窗(el, s.名);
+      装窗缩放();
+    });
     框.appendChild(行);
     体.appendChild(框);
   }
@@ -2266,6 +2295,116 @@ function 存布局() {
 function 拉关系图() {
   if (!有壳()) return;
   window.chrome.webview.postMessage({ 命令: '关系图数据' });
+}
+
+// ══════════════════════════════════════════════════════════════
+// 窗户：脚本框张开之后，里面那块独立画布
+//
+// 这是你说的第三级。判据跟网状图一个（不是倍率，是屏幕字号）：
+//   正文字号 14px × 外层 视.z  ≥ 24px  →  这扇窗够大了，能当编辑器用
+// 到了才让开 —— 不够大的时候开出来也是一团糊。
+//
+// 开出来之后，块画在 内世界 里，它自己一套 scale（内视），
+// 跟外面那张关系网各管各的。网还在，只是这一格被裁了。
+// ══════════════════════════════════════════════════════════════
+const 窗 = { 脚本: null, 实例: null, el: null, 内: null, 内视: { x: 0, y: 0, z: 1 } };
+
+function 屏幕字号() { return 14 * (视.z || 1); }
+function 够大() { return 屏幕字号() >= 24; }
+
+function 应用内视() {
+  if (!窗.内) return;
+  窗.内.style.setProperty('--内x', 窗.内视.x + 'px');
+  窗.内.style.setProperty('--内y', 窗.内视.y + 'px');
+  窗.内.style.setProperty('--内z', 窗.内视.z);
+}
+
+function 关窗() {
+  if (!窗.el) return;
+  窗.el.closest('.脚本框')?.classList.remove('开');
+  窗.el.remove();
+  窗.el = null; 窗.内 = null; 窗.脚本 = null; 窗.实例 = null;
+  当前画布 = null;
+}
+
+function 开窗(实例el, 脚本名) {
+  const 框el = 实例el.querySelector(`.脚本框[data-名="${CSS.escape(脚本名)}"]`);
+  if (窗.脚本 === 脚本名) { 关窗(); return; }
+
+  if (!够大()) {
+    网提示(`放大到最大等级再开 —— 现在字号 ${屏幕字号().toFixed(0)}px，要 24px`);
+    return;
+  }
+  if (!工程表[脚本名]) {
+    网提示('这个脚本还没有块树：' + 脚本名);
+    return;
+  }
+
+  关窗();
+  窗.脚本 = 脚本名; 窗.实例 = 实例el.dataset.id;
+  窗.内视 = { x: 24, y: 24, z: 1 };
+
+  const w = document.createElement('div');
+  w.className = '窗户';
+  // 按**屏幕比例**给尺寸，不按实例框那 183px。
+  // 窗户要张大到铺满舞台，才叫「能当编辑器用」；嵌在实例框里缩到 0.2 倍
+  // 还是看不清 —— 那等于没开。宽度除 视.z 是因为它长在 #world 里，
+  // 屏幕上还要再乘一次外层缩放。
+  const 外层z = 视.z || 1;
+  w.style.width  = Math.round(Math.min(舞台.offsetWidth * 0.92 / 外层z, 1400)) + 'px';
+  w.style.height = Math.round(Math.min(舞台.offsetHeight * 0.88 / 外层z, 900)) + 'px';
+  const 内 = document.createElement('div');
+  内.className = '内世界';
+  w.appendChild(内);
+  (框el || 实例el).appendChild(w);
+  窗.el = w; 窗.内 = 内;
+  if (框el) 框el.classList.add('开');
+  应用内视();
+
+  // 把当前工程换成这个脚本，然后重画 —— 重画会挂到 当前画布，也就是 内世界
+  当前画布 = 内;
+  切到工程(脚本名);
+  布局(根块们);
+
+  // 窗户里先缩到整棵树装得下，用户再自己滚。
+  // 不缩的话块是 857×1600，窗户才 420 高 —— 开出来只看得到左上角一小块。
+  requestAnimationFrame(() => {
+    布局(根块们);
+    let 右 = 0, 下 = 0;
+    for (const el of 内.querySelectorAll(':scope > .blk')) {
+      右 = Math.max(右, (parseFloat(el.style.left) || 0) + el.offsetWidth);
+      下 = Math.max(下, (parseFloat(el.style.top) || 0) + el.offsetHeight);
+    }
+    if (右 > 0 && 下 > 0) {
+      const 边 = 16;
+      // 只按**宽度**装下，不按高度 —— 一个脚本几十个块，高度装下就得缩到 0.2，
+      // 字只剩 5.6px，开出来还是看不清。装得下宽就够，高度你自己滚。
+      const z宽 = (w.offsetWidth - 边 * 2) / 右;
+      窗.内视 = { x: 边, y: 边, z: Math.min(1, Math.max(0.25, z宽)) };
+      应用内视();
+    }
+  });
+}
+
+// 在窗户里滚轮 = 缩窗户里的世界。按 Shift 才算外层。
+// 跟设计稿一个分工：鼠标在哪层缩哪层。
+function 装窗缩放() {
+  const 内 = 窗.内;
+  if (!内) return;
+  内.addEventListener('wheel', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = 内.getBoundingClientRect();
+    const 旧 = 窗.内视.z;
+    const 新 = Math.min(3, Math.max(0.3, 旧 * (e.deltaY > 0 ? 0.9 : 1.1)));
+    // 以光标为中心：光标底下那个点缩放前后停在原地
+    const lx = (e.clientX - r.left - 窗.内视.x) / 旧;
+    const ly = (e.clientY - r.top - 窗.内视.y) / 旧;
+    窗.内视.x = e.clientX - r.left - lx * 新;
+    窗.内视.y = e.clientY - r.top - ly * 新;
+    窗.内视.z = 新;
+    应用内视();
+  }, { passive: false });
 }
 
 // 一条界面上看得见的提示，不弹窗（弹窗会卡死整个页面，见下面那个「出错」的注释）
