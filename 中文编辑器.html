@@ -260,20 +260,12 @@
     border:1px solid var(--line);z-index:50;pointer-events:none}
   /* 窗户：脚本框张开后露出来的那块独立画布。
      它在关系网里面被裁着 —— 网还在，只是这一格里自己一套缩放平移。 */
-  /* 窗户浮在舞台中央，不挂在实例框底下 ——
-     挂在框底下的话，外层一放大，框变高，窗户就被推到视口外面去了。
-     fixed + 挂 body：#world 上有 transform，fixed 在 transform 祖先里
-     会退化成相对祖先定位，所以必须跳出那一层。 */
-  .窗户{position:fixed;background:var(--槽);
-    border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:20;
-    box-shadow:0 8px 40px rgba(0,0,0,.5)}
-  .窗头{display:flex;align-items:center;justify-content:space-between;gap:8px;
-    padding:6px 12px;cursor:move;user-select:none;white-space:nowrap;
-    background:var(--panel);border-bottom:1px solid var(--line);
-    color:#6f8aa3;font-size:var(--字标)}
-  .窗头 b{color:var(--字1);font-weight:normal;font-size:var(--字正文)}
-  .窗头 .关{cursor:pointer;color:var(--字4);padding:0 4px}
-  .窗头 .关:hover{color:var(--bad)}
+  /* 窗户：.实例体 里的内容。不是盖在框上的浮层 ——
+     框的边框、圆角、头、脚全都不动，换的只是肚子里装的东西。 */
+  .窗户{position:absolute;left:0;top:0;right:0;bottom:0;
+    background:var(--槽);overflow:hidden;border-radius:4px}
+  .实例体{position:relative}
+  .实例体.编辑中{padding:0;height:auto;min-height:420px}
   .内世界{position:absolute;left:0;top:34px;transform-origin:0 0;
     transform:translate(var(--内x,0px),var(--内y,0px)) scale(var(--内z,1))}
 
@@ -2766,7 +2758,7 @@ function 阈值拖(b, el, 起) {
 function 块容器() { return 当前画布 || 世界; }
 // 窗户不在 #world 里（它挂在 body 上是 fixed），所以外层 视.z 不作用在块上。
 // 块的有效缩放只有窗户自己那一层 内视.z。没开窗时才用外层的 视.z。
-function 总缩放() { return 当前画布 && 窗.内 ? (窗.内视.z || 1) : (视.z || 1); }
+function 总缩放() { return (视.z || 1) * (当前画布 && 窗.内 ? (窗.内视.z || 1) : 1); }
 
 function 开始拖(b, el, 起始) {
   el.classList.add('dragging');
@@ -4038,15 +4030,21 @@ function 应用内视() {
 }
 
 function 关窗() {
-  if (!窗.el) return;
-  窗.el.closest('.脚本框')?.classList.remove('开');
-  窗.el.remove();
-  窗.el = null; 窗.内 = null; 窗.脚本 = null; 窗.实例 = null;
+  const 体 = 窗.体;
+  if (体) {
+    体.textContent = '';
+    体.classList.remove('编辑中');
+    for (const n of (窗.原内容 || [])) 体.appendChild(n);
+  }
+  for (const el of (窗.头标 || [])) el.remove();
+  if (窗.头钮) 窗.头钮.style.display = '';
   当前画布 = null;
+  窗.el = null; 窗.内 = null; 窗.体 = null;
+  窗.原内容 = null; 窗.头标 = null; 窗.头钮 = null;
+  窗.脚本 = null; 窗.实例 = null;
 }
 
 function 开窗(实例el, 脚本名) {
-  const 框el = 实例el.querySelector(`.脚本框[data-名="${CSS.escape(脚本名)}"]`);
   if (窗.脚本 === 脚本名) { 关窗(); return; }
 
   if (!框够大(实例el)) {
@@ -4058,70 +4056,51 @@ function 开窗(实例el, 脚本名) {
     return;
   }
 
+  const 体 = 实例el.querySelector(':scope > .实例体');
+  if (!体) { 网提示('这个实例框没有内容区'); return; }
+
   关窗();
   窗.脚本 = 脚本名; 窗.实例 = 实例el.dataset.id;
-  窗.内视 = { x: 24, y: 24, z: 1 };
+  窗.体 = 体;
+  窗.原内容 = [...体.childNodes];        // 关窗时放回去
+  窗.内视 = { x: 16, y: 16, z: 1 };
 
+  体.textContent = '';
+  体.classList.add('编辑中');
+
+  // 画布：撑满 .实例体。它就在框内部，不是浮在上面的。
   const w = document.createElement('div');
   w.className = '窗户';
-  // 窗户 = 这个实例框在屏幕上的矩形，一字不差。
-  // 视觉上就是「框里面换成了编辑器」，框多大画布多大；框占满屏幕，画布就占满屏幕。
-  // 但仍钳在舞台里 —— 框放大后可能有一部分越出视口，画布不能被带到看不见的地方。
-  const 台 = 舞台.getBoundingClientRect();
-  const 框r = 实例el.getBoundingClientRect();
-  const 左 = Math.max(台.left, Math.min(框r.left, 台.right - 240));
-  const 上 = Math.max(台.top, Math.min(框r.top, 台.bottom - 160));
-  const 右 = Math.min(台.right, Math.max(框r.right, 左 + 240));
-  const 下 = Math.min(台.bottom, Math.max(框r.bottom, 上 + 160));
-  w.style.left = Math.round(左) + 'px';
-  w.style.top = Math.round(上) + 'px';
-  w.style.width = Math.round(右 - 左) + 'px';
-  w.style.height = Math.round(下 - 上) + 'px';
   const 内 = document.createElement('div');
   内.className = '内世界';
   w.appendChild(内);
-  // 标题条：写着这是哪个脚本的窗口；拖着它能挪开，挡着网的时候有用
-  const 头 = document.createElement('div');
-  头.className = '窗头';
-  const 题 = document.createElement('span');
-  题.innerHTML = '<b></b> <span class="哪"></span>';
-  题.querySelector('b').textContent = 脚本名;
-  题.querySelector('.哪').textContent = (实例el.querySelector('.实例名') || {}).textContent || '';
-  const 关钮 = document.createElement('span');
-  关钮.className = '关';
-  关钮.textContent = '✕';
-  关钮.title = '关掉这扇窗';
-  关钮.addEventListener('click', e => { e.stopPropagation(); 关窗(); });
-  头.appendChild(题); 头.appendChild(关钮);
-  w.appendChild(头);
-  头.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || e.target === 关钮) return;
-    e.preventDefault();
-    const 起 = { x: e.clientX, y: e.clientY, ox: parseFloat(w.style.left), oy: parseFloat(w.style.top) };
-    const 动 = ev => {
-      w.style.left = Math.round(起.ox + ev.clientX - 起.x) + 'px';
-      w.style.top = Math.round(起.oy + ev.clientY - 起.y) + 'px';
-    };
-    const 停 = () => { window.removeEventListener('pointermove', 动); window.removeEventListener('pointerup', 停); };
-    window.addEventListener('pointermove', 动);
-    window.addEventListener('pointerup', 停);
-  });
-  // 内世界从标题条下面开始算，别被压住
-  内.style.top = '0px';
-
-  // 挂到 body：窗户是浮在整个界面上的窗口，不是某个框里的子元素
-  document.body.appendChild(w);
+  体.appendChild(w);
   窗.el = w; 窗.内 = 内;
-  if (框el) 框el.classList.add('开');
-  应用内视();
 
-  // 把当前工程换成这个脚本，然后重画 —— 重画会挂到 当前画布，也就是 内世界
+  // 框头上标一下现在在编辑哪个脚本，旁边一个返回
+  const 头 = 实例el.querySelector(':scope > .实例头');
+  if (头) {
+    const 标 = document.createElement('span');
+    标.className = '正在编';
+    标.textContent = '正在编 ' + 脚本名;
+    const 返 = document.createElement('span');
+    返.className = '编钮';
+    返.textContent = '← 返回';
+    返.title = '收起编辑器，回到脚本列表';
+    返.addEventListener('click', e => { e.stopPropagation(); 关窗(); });
+    const 原编 = 头.querySelector('.编钮');
+    if (原编) 原编.style.display = 'none';
+    头.appendChild(标); 头.appendChild(返);
+    窗.头钮 = 原编;
+    窗.头标 = [标, 返];
+  }
+
+  // 把当前工程换成这个脚本，重画 —— 重画会挂到 当前画布，也就是 内世界
   当前画布 = 内;
   切到工程(脚本名);
   布局(根块们);
 
-  // 窗户里先缩到整棵树装得下，用户再自己滚。
-  // 不缩的话块是 857×1600，窗户才 420 高 —— 开出来只看得到左上角一小块。
+  // 先缩到整棵树装得下，用户再自己滚
   requestAnimationFrame(() => {
     布局(根块们);
     let 右 = 0, 下 = 0;
@@ -4130,14 +4109,10 @@ function 开窗(实例el, 脚本名) {
       下 = Math.max(下, (parseFloat(el.style.top) || 0) + el.offsetHeight);
     }
     if (右 > 0 && 下 > 0) {
-      const 边 = 16;
-      // 只按**宽度**装下，不按高度 —— 一个脚本几十个块，高度装下就得缩到 0.2，
-      // 字只剩 5.6px，开出来还是看不清。装得下宽就够，高度你自己滚。
-      const z宽 = (w.offsetWidth - 边 * 2) / 右;
-      // ⚠️ 这里千万别加下限。块树能有两千多宽，窗宽只够 290，装上要 0.131；
-      //    托到 0.25 的话可见范围只剩 1288，块直接被推到窗户外面 900 多像素 ——
-      //    看着就是「块乱飞」。字小是内容的事，靠滚轮放大编辑，不能靠不装下。
-      窗.内视 = { x: 边, y: 边, z: Math.min(1, Math.max(0.08, z宽)) };
+      const 边 = 12;
+      const 宽 = w.offsetWidth || 400, 高 = w.offsetHeight || 300;
+      const z = Math.min((宽 - 边 * 2) / 右, (高 - 边 * 2) / 下, 1);
+      窗.内视 = { x: 边, y: 边, z: Math.max(0.08, z) };
       应用内视();
     }
   });
