@@ -272,12 +272,20 @@
   .注释框{position:absolute;border:1px solid #3d5064;border-radius:10px;
     background:color-mix(in srgb, #4a6a8a 7%, transparent);
     pointer-events:none;box-sizing:border-box}
+  /* ⚠️ 框头不能横贯整条。
+     原来它是 left:0;right:0 的一整条 26px —— 框里任何贴着顶部的东西都被它盖住，
+     拖那个小框等于拖整个大框（表现就是「小框拖不动」和「拖小框结果大框跑了」）。
+     现在只有标题文字和 × 能接鼠标，其余穿透下去。 */
   .注释框 .框头{position:absolute;left:0;right:0;top:0;height:26px;
     display:flex;align-items:center;gap:8px;padding:0 10px;
-    font-size:12px;color:#8aa2bd;cursor:move;pointer-events:auto;
+    font-size:12px;color:#8aa2bd;pointer-events:none;
     border-bottom:1px solid color-mix(in srgb, #3d5064 60%, transparent)}
   .注释框 .框头 .名额{margin-left:auto;color:#5d7086}
-  .注释框 .框叉{margin-left:8px;padding:0 4px;color:#5d7086;cursor:pointer;font-size:14px;line-height:1}
+  .注释框 .框标题{pointer-events:auto;cursor:move;min-width:90px;outline:none;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .注释框 .框标题[contenteditable="true"]{cursor:text}
+  .注释框 .框叉{margin-left:8px;padding:0 4px;color:#5d7086;cursor:pointer;font-size:14px;line-height:1;
+    pointer-events:auto}
   .注释框 .框叉:hover{color:#d96464}
   /* 四个角：就是普通窗口那种把手，没有箭头、没有「调整大小」的字。
      ⚠️ 命中区要够大。12px 在缩放 0.42 时只有 5 个屏幕像素，实测点不中 ——
@@ -2515,7 +2523,15 @@ function 建注释框(框) {
       for (const m of 员) {
         m.el.style.left = Math.round(m.位.x + dx) + 'px';
         m.el.style.top = Math.round(m.位.y + dy) + 'px';
-        if (m.id) 网.位置.set(m.id, { x: Math.round(m.位.x + dx), y: Math.round(m.位.y + dy) });
+        // ⚠️ 改字段，不要 set 一个新对象！
+        //    实例框的拖动闭包里握着的是 网.位置.get(id) 那个对象的引用，
+        //    这里一替换，它改的还是旧对象 —— 图上读新对象，两边对不上，
+        //    表现就是「拖框里的小框到处乱飞」。
+        if (m.id) {
+          const 现 = 网.位置.get(m.id);
+          if (现) { 现.x = Math.round(m.位.x + dx); 现.y = Math.round(m.位.y + dy); }
+          else 网.位置.set(m.id, { x: Math.round(m.位.x + dx), y: Math.round(m.位.y + dy) });
+        }
       }
       画线();
     };
