@@ -120,7 +120,13 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     const h=b.querySelector(':scope > .head').getBoundingClientRect();
     let d=null; const id=b.dataset.id;
     (function 走(l){for(const x of l||[]){ if(String(x.id)===id) d={x:x.x,y:x.y}; 走(x.子); for(const s of x.分支||[]) 走(s.子);} })(根块们);
-    return JSON.stringify({id, 头:[h.left+h.width/2, h.top+h.height/2], d, 总:(窗.内视.z||视.z)});
+    // 总缩放 = 内层 × 外层，两个都得算。
+    // 块躺在 内世界 里，内世界又被 #world 按 视.z 缩过一遍 ——
+    // 屏幕上走 90px，数据位移是 90 ÷ (内视.z × 视.z)。
+    // 这里原来只除了 内视.z，漏了外层（实测 0.182 × 3.763 = 0.685），
+    // 于是量到 (376.2,228.6) 而期望 (1125,687.5)，差 2.99 倍 —— 不是代码错，是这个期望值错。
+    return JSON.stringify({id, 头:[h.left+h.width/2, h.top+h.height/2], d,
+      总:((窗.内视.z || 1) * (视.z || 1))});
   })()`));
   const 命B = await 命中(B0.头);
   if (命B.块 === B0.id) {
