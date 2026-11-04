@@ -279,6 +279,14 @@
   .注释框 .框头 .名额{margin-left:auto;color:#5d7086}
   .注释框 .框叉{margin-left:8px;padding:0 4px;color:#5d7086;cursor:pointer;font-size:14px;line-height:1}
   .注释框 .框叉:hover{color:#d96464}
+  /* 四个角：就是普通窗口那种把手，没有箭头、没有「调整大小」的字。
+     ⚠️ 命中区要够大。12px 在缩放 0.42 时只有 5 个屏幕像素，实测点不中 ——
+        拖了三回都抓到的是画布本身（把画布平移了）。 */
+  .注释框 .框角{position:absolute;width:20px;height:20px;pointer-events:auto}
+  .注释框 .框角.nw{left:-10px;top:-10px;cursor:nwse-resize}
+  .注释框 .框角.ne{right:-10px;top:-10px;cursor:nesw-resize}
+  .注释框 .框角.sw{left:-10px;bottom:-10px;cursor:nesw-resize}
+  .注释框 .框角.se{right:-10px;bottom:-10px;cursor:nwse-resize}
   .注释框.选中{border-color:#7a8fa8;box-shadow:0 0 0 1px #7a8fa855}
   .注释框 .框标题{cursor:text;outline:none}
   .注释框 .框标题:empty::before{content:'未命名';color:#3d5064}
@@ -2470,6 +2478,14 @@ function 建注释框(框) {
   头.appendChild(标); 头.appendChild(数); 头.appendChild(叉);
   el.appendChild(头);
 
+  // 四个角是把手，拖动改大小 —— 就是普通窗口那种，没有任何按钮和文字
+  for (const 角 of ['nw', 'ne', 'sw', 'se']) {
+    const h = document.createElement('i');
+    h.className = '框角 ' + 角;
+    h.addEventListener('pointerdown', e => 拖角(e, 框, el, 角));
+    el.appendChild(h);
+  }
+
   头.addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
     const 单 = 做右键单();
@@ -2537,25 +2553,27 @@ function 画注释框们() {
   注.className = '注';
   注.textContent = '画布';
   单.appendChild(注);
-  加右键项(单, '新增大注释框', () => 新注释框(), false, 'Ctrl+Shift+B');
+  加右键项(单, '新增大注释框', () => 进入画框(), false, 'Ctrl+Shift+B');
   摆右键单(单, e);
 });
 
-// 快捷键：新建大注释框。
-// 同 Unreal 的 C 键是同一个意思 —— 但这里 C 已经被别的地方占了，换成 Ctrl+Shift+B（Box）。
+// 快捷键：进入画框状态。跟 Unreal 的 C 键是同一个意思，但 C 在这儿被占了。
 document.addEventListener('keydown', e => {
   if (!(e.ctrlKey && e.shiftKey)) return;
   if (e.key !== 'B' && e.key !== 'b') return;
   if (e.target && e.target.isContentEditable) return;   // 正在改标题
   e.preventDefault();
-  新注释框();
+  进入画框();
 });
 
 舞台.addEventListener('pointerdown', e => {
-  if (e.button !== 0 || !e.ctrlKey) return;
+  if (e.button !== 0) return;
+  // 两条路进来：Ctrl 直接拖，或者先点了「新增大注释框」再拖
+  if (!e.ctrlKey && !等画框) return;
   if (e.target.closest('.窗户') || e.target.closest('.空头框')) return;
   if (!网.开 || !网.框层) return;
   e.preventDefault();
+  退出画框();
 
   const 台r = 世界.getBoundingClientRect();
   const z = 视.z || 1;
@@ -2909,27 +2927,22 @@ function 加右键项(单, 字, 事, 险, 键) {
 }
 
 // ── 大注释框：新建 / 删除 ──────────────────────────────
-function 新注释框() {
+//
+// 新建不是「直接生成一个框」，是进入画图状态 —— 跟画图软件里点矩形工具一样：
+// 先选工具，再在画布上拖出范围。多一步点击，但框多大、在哪儿都由你定。
+
+let 等画框 = false;
+
+function 进入画框() {
   if (!网.开 || !网.框层) { 网提示('还没连上关系库'); return; }
-  const 台 = 舞台.getBoundingClientRect();
-  const z = 视.z || 1;
-  // 摆在视野正中 —— 跟「拖出来」不一样，这个是「先要一个再挪」
-  const 中x = (台.width / 2 - 视.x) / z;
-  const 中y = (台.height / 2 - 视.y) / z;
-  const 宽 = 420, 高 = 280;
-  const 框 = {
-    id: '框' + Date.now().toString(36),
-    标题: '',
-    x: Math.round(中x - 宽 / 2), y: Math.round(中y - 高 / 2),
-    宽, 高, 收起: false,
-  };
-  网.注释框们.push(框);
-  画注释框们();
-  存注释框();
-  // 新建出来直接能打名字 —— 不然还得再点一次才知道要干嘛
-  const el = 网.框层.querySelector('.注释框[data-id="' + CSS.escape(框.id) + '"]');
-  const 标 = el && el.querySelector('.框标题');
-  if (标) { 标.contentEditable = 'true'; 标.focus(); }
+  等画框 = true;
+  舞台.style.cursor = 'crosshair';
+  网提示('在画布上拖一个矩形');
+}
+
+function 退出画框() {
+  等画框 = false;
+  舞台.style.cursor = '';
 }
 
 function 删注释框(id) {
@@ -2938,6 +2951,34 @@ function 删注释框(id) {
   if (网.注释框们.length === 前) return;
   画注释框们();
   存注释框();
+}
+
+// 拖角改大小。四个角都是把手，没有按钮、没有文字。
+function 拖角(e, 框, el, 角) {
+  e.preventDefault(); e.stopPropagation();
+  const z = 视.z || 1;
+  const 起 = { x: e.clientX, y: e.clientY, ox: 框.x, oy: 框.y, ow: 框.宽, oh: 框.高 };
+  // 别的框在这个框里面的话，框一变它们多半就不在里面了。
+  // 不跟着缩放 —— 那是容器的事，这里只是画个范围。
+  const 移 = ev => {
+    const dx = (ev.clientX - 起.x) / z, dy = (ev.clientY - 起.y) / z;
+    let x = 起.ox, y = 起.oy, w = 起.ow, h = 起.oh;
+    if (角.includes('e')) w = Math.max(80, 起.ow + dx);
+    if (角.includes('s')) h = Math.max(56, 起.oh + dy);
+    if (角.includes('w')) { w = Math.max(80, 起.ow - dx); x = 起.ox + (起.ow - w); }
+    if (角.includes('n')) { h = Math.max(56, 起.oh - dy); y = 起.oy + (起.oh - h); }
+    框.x = Math.round(x); 框.y = Math.round(y);
+    框.宽 = Math.round(w); 框.高 = Math.round(h);
+    el.style.left = 框.x + 'px'; el.style.top = 框.y + 'px';
+    el.style.width = 框.宽 + 'px'; el.style.height = 框.高 + 'px';
+  };
+  const 停 = () => {
+    document.removeEventListener('pointermove', 移);
+    document.removeEventListener('pointerup', 停);
+    存注释框();
+  };
+  document.addEventListener('pointermove', 移);
+  document.addEventListener('pointerup', 停);
 }
 
 function 开申诉菜单(空, e) {
