@@ -97,6 +97,37 @@
 
   main{flex:1;display:flex;min-height:0}
 
+  /* 边栏收起后只剩一条 28px 的竖条。必须留，不然收了就打不开了。
+     竖排字让它一眼能认出来是哪一栏。 */
+  .palette.收,.code.收{width:28px!important;min-width:28px!important;flex:none;
+    padding:0!important;overflow:hidden}
+  .palette.收>h2,.palette.收>#palette,
+  .code.收>.title,.code.收>.codelines,.code.收>.warn,.code.收>.errs{display:none}
+  /* 收起钮必须**常驻**。只在收起时才显示的话，展开状态就点不到它，
+     于是永远收不起来 —— 这个坑踩过一次。 */
+  .栏条{position:absolute;top:6px;right:6px;width:18px;height:18px;z-index:8;
+    display:flex;align-items:center;justify-content:center;
+    font-size:var(--字标);color:var(--字3);cursor:pointer;user-select:none;
+    border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+  .栏条:hover{color:var(--字1);border-color:#6f8aa3}
+  /* 收起后铺满整条，竖排写栏名 —— 一眼认出这是哪一栏 */
+  .palette.收>.栏条,.code.收>.栏条{top:0;right:0;left:0;bottom:0;width:auto;height:auto;
+    border:0;border-radius:0;background:none;
+    writing-mode:vertical-rl;letter-spacing:2px;color:var(--dim)}
+  .palette.收>.栏条:hover,.code.收>.栏条:hover{color:var(--cn)}
+  /* 两边的拖宽把手：贴在栏的内侧边缘 */
+  .边栏把{position:absolute;top:0;width:8px;height:100%;cursor:col-resize;z-index:6}
+  .边栏把::after{content:'';position:absolute;top:50%;width:2px;height:34px;
+    margin-top:-17px;background:var(--线亮);border-radius:1px;transition:background .12s}
+  .边栏把:hover::after,.边栏把.按着::after{background:var(--cn)}
+  .边栏把:hover,.边栏把.按着{background:color-mix(in srgb, var(--cn) 13%, transparent)}
+  .palette .边栏把{right:-3px}
+  .palette .边栏把::after{left:3px}
+  .code .边栏把{left:-3px}
+  .code .边栏把::after{left:3px}
+  /* 右边栏要能拖宽，必须给确定宽度，不能再 flex:4 抢 */
+  .code{position:relative;width:380px;flex:none;min-width:0}
+
   .palette{width:170px;flex:none;background:var(--panel);border-right:1px solid var(--line);
     padding:8px 8px;overflow:auto;position:relative}
   /* 用 grid + auto-fill：栏拖宽了列数自己变，不用改一个数字 */
@@ -1382,13 +1413,73 @@ function 挂托盘(c, 类型) {
   });
 }
 
+// ---------------- 边栏：收起 + 拖宽 ----------------
+// 两边一个模子。收起后留 28px 竖条，点竖条展开；把手在竖条上也能拖。
+function 装边栏(栏, 名, 最小, 最大) {
+  if (!栏 || 栏.dataset.双装) return;
+  栏.dataset.双装 = '1';
+
+  const 条 = document.createElement('div');
+  条.className = '栏条';
+  条.textContent = 名;
+  条.title = '点一下展开／收起';
+  栏.appendChild(条);
+
+  const 把 = document.createElement('div');
+  把.className = '边栏把';
+  栏.appendChild(把);
+
+  const 刷字 = () => {
+    // 展开时是个小方块（一个「‹」方向就够），收起时竖排写栏名
+    条.textContent = 栏.classList.contains('收') ? 名 : (名 === '块栏' ? '◀' : '▶');
+  };
+  const 收放 = () => {
+    栏.classList.toggle('收');
+    // 收起来把手就贴在竖条外侧，不然 8px 的把手把 28px 的条占掉大半
+    if (!栏.classList.contains('收') && !栏.style.width) 栏.style.width = 最小 + 'px';
+    刷字();
+  };
+  刷字();
+  条.addEventListener('click', 收放);
+  条.addEventListener('pointerdown', e => e.stopPropagation());
+
+  把.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    把.classList.add('按着');
+    // 收起状态下拖，等于「拖开一个新宽度」，起始宽按最小算
+    const 起宽 = 栏.classList.contains('收') ? 最小 : 栏.getBoundingClientRect().width;
+    const 起x = e.clientX;
+    const 左 = 栏.classList.contains('palette');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const 移 = ev => {
+      // 左栏往右拖 = 变宽；右栏往左拖 = 变宽，所以要反号
+      const 差 = (ev.clientX - 起x) * (左 ? 1 : -1);
+      const w = Math.max(最小, Math.min(最大, 起宽 + 差));
+      栏.classList.remove('收');
+      栏.style.width = w + 'px';
+    };
+    const 停 = () => {
+      把.classList.remove('按着');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+    };
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+}
+
 // ---------------- 侧栏宽度可拖 ----------------
 (function 挂侧栏拖宽() {
   const 栏 = document.querySelector('.palette');
   const 把 = document.createElement('div');
   把.className = 'palette-grip';
+  把.style.display = 'none';   // 老的把手让给新的通用把手
   栏.appendChild(把);
-  把.addEventListener('pointerdown', e => {
+  if (false) 把.addEventListener('pointerdown', e => {
     e.preventDefault();
     e.stopPropagation();
     const 起x = e.clientX, 起宽 = 栏.getBoundingClientRect().width;
@@ -2109,6 +2200,9 @@ if (有壳()) {
     }
   });
 }
+
+装边栏(document.querySelector('.palette'), '块栏', 160, 460);
+装边栏(document.querySelector('.code'), 'C# 输出', 200, 640);
 
 document.getElementById('undoBtn').onclick = () => 撤销();
 document.getElementById('redoBtn').onclick = () => 重做();
