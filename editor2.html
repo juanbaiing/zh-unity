@@ -2680,6 +2680,10 @@ if (有壳()) {
       // ⚠️ 别用 alert。它会阻塞整个页面，一个错误就把界面卡死，
       // 连「再点一次」都点不了。写成右上角的提示条就行。
       console.error('[出错]', d.说);
+      // 任何一步出错都要把按钮恢复 —— 「扫描中…」这类中间态是靠成功回话恢复的，
+      // 出错路径不恢复的话，按钮就永远停在「扫描中…」，看着像卡死了。
+      const 扫钮 = document.getElementById('scanBtn');
+      if (扫钮 && 扫钮.textContent !== '扫描项目') 扫钮.textContent = '扫描项目';
       const 条 = document.createElement('div');
       条.textContent = '✗ ' + d.说;
       条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
