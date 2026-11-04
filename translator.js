@@ -81,14 +81,25 @@ function 翻表达式(s) {
 // 单行翻译（保留原缩进）
 function 翻一行(line) {
   const indent = line.match(/^\s*/)[0];
+  // 行尾注释先摘下来，翻译完再拼回去。
+  // ⚠️ 不摘的话，块头正则（`^设若（...）\s*\{?\s*$` 这种）一碰到行尾的 `// 字`
+  //    就整条失配，于是「设若」变不成 `if`，注释还把这一行带成「没认出结构」。
+  let 尾注 = '';
+  let 原 = line.trim();
+  const 注m = 原.match(/\s*(\/\/.*)$/);
+  if (注m && 注m.index > 0) { 尾注 = 注m[1]; 原 = 原.slice(0, 注m.index).trim(); }
+  else if (注m && 注m.index === 0) { 尾注 = ''; }   // 整行就是注释，下面单独处理
+
   // 全角标点先归一：括号、分号、逗号、等号……不管怎么打都认
   // 行尾分号统一剥掉，由生成侧决定加不加，避免出现 ;;
-  const t = 归一化标点(line.trim()).replace(/;\s*$/, '');
-  const 包 = code => code === '' ? '' : indent + code;
+  const t = 归一化标点(原).replace(/;\s*$/, '');
+  const 包 = code => code === '' ? '' : indent + code + (尾注 ? ' ' + 尾注 : '');
 
-  // 空行 / 注释：丢掉
-  if (!t) return '';
-  if (t.startsWith('//') || t.startsWith('# ')) return '';
+  // 空行：丢掉
+  if (!t) return 尾注 ? indent + 尾注 : '';
+  // 整行注释：原样留给 C# —— 块上挂的注释就是这么进来的
+  if (t.startsWith('//')) return indent + t;
+  if (t.startsWith('# ')) return '';
 
   let m;
 
@@ -100,19 +111,25 @@ function 翻一行(line) {
   m = t.match(new RegExp(`^遍历${开}(.+?)\\s*(?:的|中)\\s*(?:每一个\\s*)?(\\w+)${闭}\\s*\\{?\\s*$`));
   if (m) return 包(`foreach (var ${m[2]} in ${翻表达式(m[1])}) {`);
 
+  // ⚠️ 这三个块头的括号内容用**贪婪** `(.+)`，不能用 `(.+?)`。
+  //    条件里本身可能带括号：`设若（Input.GetKeyDown(KeyCode.Space)）`
+  //    非贪婪会停在第一个 `)`，于是行尾还剩一个 `)`，`\s*\{?\s*$` 配不上，整条失配 ——
+  //    结果「设若」没翻成 `if`，还被兜底成「没认出结构」。
+  //    贪婪吃到**最后一个** `)` 才对。
+
   // 设若（条件）{
-  m = t.match(new RegExp(`^设若${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  m = t.match(new RegExp(`^设若${开}(.+)${闭}\\s*\\{?\\s*$`));
   if (m) return 包(`if (${翻表达式(m[1])}) {`);
 
   // } 否则 {    或    否则 {
   if (/^\}\s*否则\s*\{?$/.test(t)) return 包('} else {');
 
   // 只要（条件）{        —— 条件成立就一直做（while）
-  m = t.match(new RegExp(`^只要${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  m = t.match(new RegExp(`^只要${开}(.+)${闭}\\s*\\{?\\s*$`));
   if (m) return 包(`while (${翻表达式(m[1])}) {`);
 
   // 重复（次数）{        —— 数着次数做（for）
-  m = t.match(new RegExp(`^重复${开}(.+?)${闭}\\s*\\{?\\s*$`));
+  m = t.match(new RegExp(`^重复${开}(.+)${闭}\\s*\\{?\\s*$`));
   if (m) return 包(`for (int i = 0; i < ${翻表达式(m[1])}; i++) {`);
 
   // 定义 名 = 值

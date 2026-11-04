@@ -457,6 +457,23 @@
   .悬停卡 .好{color:#7fb08c}
   .悬停卡 .注{color:var(--字4);margin-top:4px;padding-top:4px;
     border-top:1px solid var(--line)}
+
+  /* 块上挂了注释：左边一小条竖线做记号，不占地方、不推布局 */
+  .块注记{position:absolute;left:-7px;top:6px;bottom:6px;width:2px;border-radius:1px;
+    background:color-mix(in srgb, var(--cn) 55%, transparent);pointer-events:none}
+
+  /* 写注释的小框 */
+  .注编辑{position:fixed;z-index:9700;width:300px;padding:10px 12px 12px;
+    border-radius:8px;background:var(--panel);border:1px solid var(--line);
+    box-shadow:0 10px 30px #000a;display:flex;flex-direction:column;gap:8px}
+  .注编辑题{font-size:var(--字标);color:var(--字4);line-height:1.5}
+  .注编辑框{width:100%;box-sizing:border-box;resize:vertical;min-height:60px;
+    background:var(--脚);color:var(--text);border:1px solid var(--line);
+    border-radius:5px;padding:6px 8px;font-family:inherit;font-size:var(--字正文);
+    outline:none;line-height:1.5}
+  .注编辑框:focus{border-color:#6f8aa3}
+  .注编辑行{display:flex;justify-content:flex-end;gap:8px}
+  .注编辑行 button{padding:3px 14px}
   .网提示{position:absolute;left:40px;top:12px;padding:8px 12px;border-radius:4px;
     background:var(--panel);color:var(--dim);font-size:var(--字正文);
     border:1px solid var(--line);z-index:50;pointer-events:none}
@@ -882,8 +899,110 @@ function 渲染块(b, 序) {
   });
 
   挂拖动(b, el);
+  挂块注释(b, el);
+  el.addEventListener('contextmenu', e => 块右键菜单(b, el, e));
 
   return el;
+}
+
+// ---------------- 块上的注释 ----------------
+//
+// 一个块可以挂一句注释，生成 C# 时拼在**第一行末尾**：
+//     if (Input.GetKeyDown(KeyCode.Space)) // 每帧检查玩家有没有按攻击键
+//
+// 为什么是行尾不是上一行：这是使用者的原话给的形状。
+// 为什么只拼第一行：像「设若」这种块会产出 `设若（条件）` 和 `{` 两行，
+// 挂到最后一行就成了 `{ // 字`，说不清是谁的注释。
+//
+// 界面：平时看不见（块上只多一个小三角标记），悬停才把字浮出来。
+// 右键块 → 菜单里「加注释 / 改注释」。
+function 挂块注释(b, el) {
+  // 标记：有注释才显示，一小条竖线贴在块左边
+  const 记 = document.createElement('i');
+  记.className = '块注记';
+  记.style.display = b.注 ? '' : 'none';
+  el.appendChild(记);
+
+  const 更新记 = () => {
+    记.style.display = b.注 ? '' : 'none';
+    记.title = '';
+  };
+  el._更新注记 = 更新记;
+
+  // 悬停浮出全文 —— 用跟边栏同一个卡片组件
+  el.addEventListener('mouseenter', () => {
+    if (!b.注) return;
+    悬停计时 = setTimeout(() => {
+      悬停计时 = null;
+      const 定义 = 块定义[b.类型] || {};
+      开悬停卡(el, (b.类型 || '块') + ' 的注释',
+        [{ 键: '注释', 值: String(b.注) }],
+        '会生成到 C# 这一行的行尾 · 右键可以改');
+    }, 220);
+  });
+  el.addEventListener('mouseleave', 关悬停卡);
+}
+
+// 右键块 → 加/改注释。
+// ⚠️ 菜单要 stopPropagation —— 否则 舞台 的右键菜单（画布那套）跟着弹。
+function 块右键菜单(b, el, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const 单 = 做右键单();
+  const 注 = document.createElement('div');
+  注.className = '注';
+  注.textContent = b.类型 + (b.注 ? ' · 已经有注释了' : '');
+  单.appendChild(注);
+  加右键项(单, b.注 ? '改注释…' : '加注释…', () => 编辑块注释(b, el), false);
+  if (b.注) 加右键项(单, '删掉这条注释', () => {
+    b.注 = '';
+    if (el._更新注记) el._更新注记();
+    输出(); 存盘();
+  }, true);
+  摆右键单(单, e);
+}
+
+function 编辑块注释(b, el) {
+  const 单 = 做右键单();
+  关右键单();
+  const 盒 = document.createElement('div');
+  盒.className = '注编辑';
+  const 标 = document.createElement('div');
+  标.className = '注编辑题';
+  标.textContent = '给这个' + b.类型 + '写一句注释（会拼到 C# 那一行的行尾）';
+  const 输 = document.createElement('textarea');
+  输.className = '注编辑框';
+  输.value = b.注 || '';
+  输.placeholder = '例：每帧检查玩家有没有按攻击键';
+  输.rows = 3;
+  const 行 = document.createElement('div');
+  行.className = '注编辑行';
+  const 定 = document.createElement('button');
+  定.textContent = '好';
+  const 消 = document.createElement('button');
+  消.textContent = '算了';
+  const 关 = () => 盒.remove();
+  const 存 = () => {
+    b.注 = 输.value.replace(/\s+/g, ' ').trim();
+    if (el._更新注记) el._更新注记();
+    关();
+    输出(); 存盘();
+  };
+  消.addEventListener('click', 关);
+  定.addEventListener('click', 存);
+  输.addEventListener('keydown', e => {
+    // Ctrl+Enter 存，Escape 取消。单按 Enter 是换行 —— 注释可以写长一点。
+    if (e.key === 'Escape') { e.stopPropagation(); 关(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); 存(); }
+  });
+  行.appendChild(消); 行.appendChild(定);
+  盒.appendChild(标); 盒.appendChild(输); 盒.appendChild(行);
+  document.body.appendChild(盒);
+  const r = el.getBoundingClientRect();
+  盒.style.left = Math.max(8, Math.min(innerWidth - 320, r.left)) + 'px';
+  盒.style.top = Math.max(8, Math.min(innerHeight - 180, r.top)) + 'px';
+  输.focus();
+  输.setSelectionRange(输.value.length, 输.value.length);
 }
 
 // ---------------- 自绘下拉 ----------------
