@@ -62,7 +62,7 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
   await 算(`(function(){
     const 实=document.querySelector('.实例框[data-id="场景|SampleScene.Cube"]');
     if (窗.el) 关窗();
-    视.z=2;
+    视.z=3;
     视.x=舞台.getBoundingClientRect().left+20-parseFloat(实.style.left)*视.z;
     视.y=舞台.getBoundingClientRect().top+20-parseFloat(实.style.top)*视.z;
     应用视(); 开窗(实,'PlayerAttack'); 装窗缩放(); return 'ok';
@@ -106,7 +106,7 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     关窗();
     const 实=document.querySelector('.实例框[data-id="场景|SampleScene.Cube"]');
     // 视野必须重置 —— 前面几轮缩放把块推出视口了，不重置的话抓点落空
-    视.z=2;
+    视.z=3;
     视.x=舞台.getBoundingClientRect().left+20-parseFloat(实.style.left)*视.z;
     视.y=舞台.getBoundingClientRect().top+20-parseFloat(实.style.top)*视.z;
     应用视();
