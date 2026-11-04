@@ -235,8 +235,9 @@
      框不描粗边、不加阴影 —— 靠块底和画布底那一档差浮起来。 */
   #线层{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;z-index:0}
   #网层{position:absolute;left:0;top:0;z-index:1}
+  /* 宽度由 JS 按「高 × 屏幕比例」定，这里不写死 —— 写死就跟长宽比打架 */
   .实例框{position:absolute;background:var(--panel);border:1px solid var(--line);
-    border-radius:8px;min-width:200px;z-index:1}
+    border-radius:8px;min-width:180px;box-sizing:border-box;z-index:1}
   .实例头{display:flex;align-items:center;justify-content:space-between;gap:8px;
     padding:8px 12px;cursor:move;user-select:none;white-space:nowrap;
     border-bottom:1px solid var(--line)}
@@ -2165,11 +2166,24 @@ function 画网(图) {
 
   网.层.textContent = '';
   for (const 实 of 网.实例们) 建实例框(实);
+  // 窗口尺寸可能变过，重算一遍长宽比
+  窗口改了就重排();
   画线();
   自动扩画布();
   // 网来了之后重新对一次视野 —— 打开时视野只对着块，网在右边外面，
   // 看着像「网没出来」。网状图是默认界面，先让人看见它。
   requestAnimationFrame(对准块);
+}
+
+// 窗口尺寸变了，所有框的宽度都跟着屏幕比例重算。
+// 长宽比是「跟着屏幕走」的，不是建的时候算一次就完事。
+function 窗口改了就重排() {
+  const 比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
+  for (const el of document.querySelectorAll('.实例框')) {
+    const 高 = el.offsetHeight;
+    if (!高) continue;
+    el.style.width = Math.round(Math.max(180, 高 * 比)) + 'px';
+  }
 }
 
 function 建实例框(实) {
@@ -2247,6 +2261,17 @@ function 建实例框(实) {
   脚.className = '实例脚';
   脚.textContent = 实.组件 || '';
   el.appendChild(脚);
+
+  // 长宽比 = 屏幕比例。先让内容把高度撑出来，再反过来定宽：宽 = 高 × 比。
+  // 这样脚本多的框自动宽、少的自动窄，形状始终跟着屏幕走；
+  // 放大到占满屏幕时，里面那块画布就是一块正常的横的编辑区，不是方的。
+  const 屏比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
+  requestAnimationFrame(() => {
+    if (!el.isConnected) return;
+    const 高 = el.offsetHeight;
+    const 宽 = Math.round(Math.max(180, 高 * 屏比));
+    el.style.width = 宽 + 'px';
+  });
 
   // 拖标题条移动整个框。用 pointer 事件，坐标除以视.z —— 和块用的是同一套换算。
   头.addEventListener('pointerdown', e => {
