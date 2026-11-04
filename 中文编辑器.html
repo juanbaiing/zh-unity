@@ -257,9 +257,13 @@
     border:1px solid var(--line);z-index:50;pointer-events:none}
   /* 窗户：脚本框张开后露出来的那块独立画布。
      它在关系网里面被裁着 —— 网还在，只是这一格里自己一套缩放平移。 */
-  /* 窗户是浮出来的：逻辑上属于这个脚本框，但尺寸按屏幕给，会盖到框外面。 */
-  .窗户{position:absolute;left:0;top:100%;margin-top:8px;background:var(--槽);
-    border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:6}
+  /* 窗户浮在舞台中央，不挂在实例框底下 ——
+     挂在框底下的话，外层一放大，框变高，窗户就被推到视口外面去了。
+     fixed + 挂 body：#world 上有 transform，fixed 在 transform 祖先里
+     会退化成相对祖先定位，所以必须跳出那一层。 */
+  .窗户{position:fixed;background:var(--槽);
+    border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:20;
+    box-shadow:0 8px 40px rgba(0,0,0,.5)}
   .内世界{position:absolute;left:0;top:0;transform-origin:0 0;
     transform:translate(var(--内x,0px),var(--内y,0px)) scale(var(--内z,1))}
 
@@ -2078,18 +2082,24 @@ function 应用视() {
   if (牌) 牌.textContent = Math.round(视.z * 100) + '%';
 }
 
-舞台.addEventListener('wheel', e => {
-  if (e.ctrlKey) return;
-  e.preventDefault();
+// 缩外层。抽成函数是因为窗户浮在 body 上、不在舞台里 ——
+// 事件冒泡不到这里，窗户那边的 Shift+滚只能自己调这个。
+function 缩外层(clientX, clientY, 放大) {
   const 前 = 视.z;
-  const 后 = Math.min(3, Math.max(0.2, 前 * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+  const 后 = Math.min(3, Math.max(0.2, 前 * (放大 ? 1.12 : 1 / 1.12)));
   // 光标指着的那一点，缩放前后要停在原地
   const r = 舞台.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const mx = clientX - r.left, my = clientY - r.top;
   视.x = mx - (mx - 视.x) * (后 / 前);
   视.y = my - (my - 视.y) * (后 / 前);
   视.z = 后;
   应用视();
+}
+
+舞台.addEventListener('wheel', e => {
+  if (e.ctrlKey) return;
+  e.preventDefault();
+  缩外层(e.clientX, e.clientY, e.deltaY < 0);
 }, { passive: false });
 
 // 拖空白 = 平移。块自己会 stopPropagation，不会误触。
@@ -2744,7 +2754,9 @@ function 阈值拖(b, el, 起) {
 // 拖拽拿到的都是**屏幕**坐标，换回画布坐标必须除以这个总倍率 ——
 // 上一次移植就是漏了这一层，块一拖就飞出去。
 function 块容器() { return 当前画布 || 世界; }
-function 总缩放() { return (视.z || 1) * (当前画布 && 窗.内 ? (窗.内视.z || 1) : 1); }
+// 窗户不在 #world 里（它挂在 body 上是 fixed），所以外层 视.z 不作用在块上。
+// 块的有效缩放只有窗户自己那一层 内视.z。没开窗时才用外层的 视.z。
+function 总缩放() { return 当前画布 && 窗.内 ? (窗.内视.z || 1) : (视.z || 1); }
 
 function 开始拖(b, el, 起始) {
   el.classList.add('dragging');
@@ -4022,17 +4034,19 @@ function 开窗(实例el, 脚本名) {
 
   const w = document.createElement('div');
   w.className = '窗户';
-  // 按**屏幕比例**给尺寸，不按实例框那 183px。
-  // 窗户要张大到铺满舞台，才叫「能当编辑器用」；嵌在实例框里缩到 0.2 倍
-  // 还是看不清 —— 那等于没开。宽度除 视.z 是因为它长在 #world 里，
-  // 屏幕上还要再乘一次外层缩放。
-  const 外层z = 视.z || 1;
-  w.style.width  = Math.round(Math.min(舞台.offsetWidth * 0.92 / 外层z, 1400)) + 'px';
-  w.style.height = Math.round(Math.min(舞台.offsetHeight * 0.88 / 外层z, 900)) + 'px';
+  // 尺寸按**屏幕像素**给，不除外层缩放 —— 窗户已经不在 #world 里了，
+  // 外层怎么缩都影响不到它。铺满舞台 92%×88%，周围留着网。
+  const 台 = 舞台.getBoundingClientRect();
+  const 宽 = Math.round(台.width * 0.92), 高 = Math.round(台.height * 0.88);
+  w.style.width = 宽 + 'px';
+  w.style.height = 高 + 'px';
+  w.style.left = Math.round(台.left + (台.width - 宽) / 2) + 'px';
+  w.style.top = Math.round(台.top + (台.height - 高) / 2) + 'px';
   const 内 = document.createElement('div');
   内.className = '内世界';
   w.appendChild(内);
-  (框el || 实例el).appendChild(w);
+  // 挂到 body：窗户是浮在整个界面上的窗口，不是某个框里的子元素
+  document.body.appendChild(w);
   窗.el = w; 窗.内 = 内;
   if (框el) 框el.classList.add('开');
   应用内视();
@@ -4075,7 +4089,14 @@ function 装窗缩放() {
     // ⚠️ Shift 交给外层。窗户占了舞台 92%×88%，不留这个口子的话
     //    开窗后鼠标几乎总在窗户上，外层那张网怎么都缩不了 ——
     //    看着就是「缩放被卡住」。设计稿里就是这么分工的。
-    if (e.shiftKey) return;
+    if (e.shiftKey) {
+      // 窗户浮在 body 上，不在舞台里 —— 事件冒泡不到舞台那个 handler，
+      // 所以 Shift 得在这儿自己动手缩外层。
+      e.preventDefault();
+      e.stopPropagation();
+      缩外层(e.clientX, e.clientY, e.deltaY < 0);
+      return;
+    }
     // 窗户里滚 = 缩窗户里的世界。stopPropagation 挡住外层那张网。
     e.preventDefault();
     e.stopPropagation();
