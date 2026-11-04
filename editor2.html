@@ -481,6 +481,9 @@ function 缩外层(clientX, clientY, 放大) {
 
 舞台.addEventListener('wheel', e => {
   if (e.ctrlKey) return;
+  // 事件发生在窗户里就让开 —— 那一下归窗户自己缩。
+  // 不靠窗户那边 stopPropagation 兜着，两边各判各的，谁也漏不了。
+  if (!e.shiftKey && e.target.closest && e.target.closest('.窗户')) return;
   e.preventDefault();
   缩外层(e.clientX, e.clientY, e.deltaY < 0);
 }, { passive: false });
@@ -489,6 +492,9 @@ function 缩外层(clientX, clientY, 放大) {
 let 平移 = null;
 舞台.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
+  // 在窗户里按的，归窗户平移它自己的世界 —— 外层不许跟着动。
+  // 这里不加的话，拖窗户内空白时整张网也在挪，看着就是「内外一起动」。
+  if (e.target.closest && e.target.closest('.窗户')) return;
   if (e.target.closest('.blk') || e.target.closest('.palette')) return;
   平移 = { sx: e.clientX, sy: e.clientY, ox: 视.x, oy: 视.y };
   舞台.classList.add('平移中');
@@ -2654,6 +2660,7 @@ function 装窗缩放() {
     if (e.button !== 0) return;
     if (e.target.closest('.blk') || e.target.closest('input') || e.target.closest('textarea')) return;
     e.preventDefault();
+    e.stopPropagation();
     const 起 = { x: e.clientX, y: e.clientY, ox: 窗.内视.x, oy: 窗.内视.y };
     框.classList.add('平移中');
     const 移 = ev => {
