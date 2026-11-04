@@ -277,6 +277,9 @@
     font-size:12px;color:#8aa2bd;cursor:move;pointer-events:auto;
     border-bottom:1px solid color-mix(in srgb, #3d5064 60%, transparent)}
   .注释框 .框头 .名额{margin-left:auto;color:#5d7086}
+  .注释框 .框叉{margin-left:8px;padding:0 4px;color:#5d7086;cursor:pointer;font-size:14px;line-height:1}
+  .注释框 .框叉:hover{color:#d96464}
+  .注释框.选中{border-color:#7a8fa8;box-shadow:0 0 0 1px #7a8fa855}
   .注释框 .框标题{cursor:text;outline:none}
   .注释框 .框标题:empty::before{content:'未命名';color:#3d5064}
   .注释框.拖出中{border-style:dashed;background:color-mix(in srgb, #4a6a8a 12%, transparent)}
@@ -354,7 +357,8 @@
     background:var(--panel);border:1px solid var(--line);box-shadow:0 8px 24px #0009;
     font-size:var(--字正文);max-height:60vh;overflow:auto}
   .右键单 .项{padding:6px 10px;border-radius:4px;cursor:pointer;color:var(--text);
-    white-space:nowrap}
+    white-space:nowrap;display:flex;align-items:center;gap:28px}
+  .右键单 .项 .键{margin-left:auto;color:var(--字4);font-size:var(--字标)}
   .右键单 .项:hover{background:var(--line);color:var(--字1)}
   .右键单 .项.险:hover{background:var(--错底);color:var(--bad)}
   .右键单 .分{height:1px;margin:4px 6px;background:var(--line)}
@@ -4121,8 +4125,26 @@ function 建注释框(框) {
   const 数 = document.createElement('span');
   数.className = '名额';
   数.textContent = 框里成员(框).length + ' 个';
-  头.appendChild(标); 头.appendChild(数);
+  // × 删掉这个框。里面的东西不动 —— 框只是「这段时间在弄的这堆」，不是容器。
+  const 叉 = document.createElement('span');
+  叉.className = '框叉';
+  叉.textContent = '×';
+  叉.title = '删掉这个框（里面的东西不动）';
+  叉.addEventListener('pointerdown', e => e.stopPropagation());
+  叉.addEventListener('click', e => { e.stopPropagation(); 删注释框(框.id); });
+  头.appendChild(标); 头.appendChild(数); 头.appendChild(叉);
   el.appendChild(头);
+
+  头.addEventListener('contextmenu', e => {
+    e.preventDefault(); e.stopPropagation();
+    const 单 = 做右键单();
+    const 注 = document.createElement('div');
+    注.className = '注';
+    注.textContent = 框.标题 || '未命名的大框';
+    单.appendChild(注);
+    加右键项(单, '删掉这个框', () => 删注释框(框.id), true);
+    摆右键单(单, e);
+  });
 
   头.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
@@ -4171,8 +4193,27 @@ function 画注释框们() {
 //    Alt+左键也不行 —— 那是 Windows 的「拖窗口」手势。
 舞台.addEventListener('contextmenu', e => {
   if (e.target.closest('.窗户')) return;
-  if (e.target.closest('.空头框')) return;   // 那种右键有自己的申诉菜单
+  if (e.target.closest('.空头框')) return;    // 那种右键有自己的申诉菜单
+  if (e.target.closest('.注释框')) return;    // 框头自己处理（删框）
   e.preventDefault();
+  if (!网.开) return;
+  const 单 = 做右键单();
+  const 注 = document.createElement('div');
+  注.className = '注';
+  注.textContent = '画布';
+  单.appendChild(注);
+  加右键项(单, '新增大注释框', () => 新注释框(), false, 'Ctrl+Shift+B');
+  摆右键单(单, e);
+});
+
+// 快捷键：新建大注释框。
+// 同 Unreal 的 C 键是同一个意思 —— 但这里 C 已经被别的地方占了，换成 Ctrl+Shift+B（Box）。
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey && e.shiftKey)) return;
+  if (e.key !== 'B' && e.key !== 'b') return;
+  if (e.target && e.target.isContentEditable) return;   // 正在改标题
+  e.preventDefault();
+  新注释框();
 });
 
 舞台.addEventListener('pointerdown', e => {
@@ -4510,10 +4551,19 @@ function 摆右键单(单, e) {
   单.style.top = Math.max(8, Math.min(e.clientY, window.innerHeight - r.height - 8)) + 'px';
 }
 
-function 加右键项(单, 字, 事, 险) {
+function 加右键项(单, 字, 事, 险, 键) {
   const 项 = document.createElement('div');
   项.className = '项' + (险 ? ' 险' : '');
-  项.textContent = 字;
+  const 名 = document.createElement('span');
+  名.textContent = 字;
+  项.appendChild(名);
+  // 快捷键写在右边（菜单里看得见，不用去翻文档）
+  if (键) {
+    const k = document.createElement('span');
+    k.className = '键';
+    k.textContent = 键;
+    项.appendChild(k);
+  }
   项.addEventListener('click', ev => {
     ev.stopPropagation();
     关右键单();
@@ -4521,6 +4571,38 @@ function 加右键项(单, 字, 事, 险) {
   });
   单.appendChild(项);
   return 项;
+}
+
+// ── 大注释框：新建 / 删除 ──────────────────────────────
+function 新注释框() {
+  if (!网.开 || !网.框层) { 网提示('还没连上关系库'); return; }
+  const 台 = 舞台.getBoundingClientRect();
+  const z = 视.z || 1;
+  // 摆在视野正中 —— 跟「拖出来」不一样，这个是「先要一个再挪」
+  const 中x = (台.width / 2 - 视.x) / z;
+  const 中y = (台.height / 2 - 视.y) / z;
+  const 宽 = 420, 高 = 280;
+  const 框 = {
+    id: '框' + Date.now().toString(36),
+    标题: '',
+    x: Math.round(中x - 宽 / 2), y: Math.round(中y - 高 / 2),
+    宽, 高, 收起: false,
+  };
+  网.注释框们.push(框);
+  画注释框们();
+  存注释框();
+  // 新建出来直接能打名字 —— 不然还得再点一次才知道要干嘛
+  const el = 网.框层.querySelector('.注释框[data-id="' + CSS.escape(框.id) + '"]');
+  const 标 = el && el.querySelector('.框标题');
+  if (标) { 标.contentEditable = 'true'; 标.focus(); }
+}
+
+function 删注释框(id) {
+  const 前 = 网.注释框们.length;
+  网.注释框们 = (网.注释框们 || []).filter(f => f.id !== id);
+  if (网.注释框们.length === 前) return;
+  画注释框们();
+  存注释框();
 }
 
 function 开申诉菜单(空, e) {
