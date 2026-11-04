@@ -100,6 +100,43 @@ namespace 图数据
             catch { /* 老库还没建布局表 —— 用网格默认位置就行 */ }
 
             var 实例们 = new List<object>();
+            var 申诉 = 读申诉(连);
+            var 空头们 = new List<(string id, string 自, string 组件, string 字段, string 种类, string 申诉)>();
+            var 空头键 = new HashSet<string>(StringComparer.Ordinal);
+
+            // 组件 id → 它挂在哪个实例身上。空头和线都按实例摆，不按组件。
+            string 到实例id(string 组件id) =>
+                节点们.TryGetValue(组件id, out var 节) && 节.父 != null ? 节.父 : 组件id;
+
+            // 图上只画场景实例，预制体不画框。所以预制体上的断口没有落脚点 ——
+            // 但它是被谁用的看得见：找场景里挂了同一个脚本的实例，落在它身上。
+            // 找不到就照原样返回，画不出来是画不出来，别硬凑。
+            string 落点(string 组件id)
+            {
+                var 父 = 到实例id(组件id);
+                if (父.StartsWith(场景树, StringComparison.Ordinal)) return 父;
+                var 类名 = 组件id.Split('.').Last();
+                var 方 = 类名.IndexOf('[');
+                if (方 > 0) 类名 = 类名.Substring(0, 方);   // EnemyHp[2] → EnemyHp
+                if (实例.TryGetValue(类名, out var 们) && 们.Count > 0) return 到实例id(们[0]);
+                return 父;
+            }
+
+            // 记一个「面板上该有东西，那儿是空」的口。
+            // 申诉过的三种处理：
+            //   连到 → 不记空头（改成一条正常的线）
+            //   正常 → 照记，但标成误报，前端不标红
+            //   隐藏 → 不记
+            void 记空头(string 组件id, string 字段, string 种类)
+            {
+                var 口 = 断口(组件id, 字段, 种类);
+                if (!空头键.Add(口)) return;
+                申诉.TryGetValue(口, out var 答);
+                if (答.动作 == "隐藏" || 答.动作 == "连到") return;
+                空头们.Add((口, 落点(组件id), 组件id, 字段, 种类,
+                            string.IsNullOrEmpty(答.动作) ? null : 答.动作));
+            }
+
             var 组节点 = 节点列表
                 .Where(n => n.类型 == "组件" && n.树 == "场景")
                 .OrderBy(n => n.id, StringComparer.Ordinal);
@@ -215,6 +252,10 @@ namespace 图数据
                                     到实例 = 节点们.TryGetValue(脚本id0, out var 目标节点) && 目标节点.父 != null
                                         ? 目标节点.父 : 脚本id0;
                                 }
+                                // ⚠️ 这里曾经按「到不了场景实例」判空头 —— 实测 19 条里 18 条是假的：
+                                //    GetComponent&lt;Rigidbody&gt; / Slider / Text / Renderer 这些**引擎组件本来就不建节点**，
+                                //    它们"找不到实例"是正常的，不是断链。误报率 95%，红色警告立刻不值钱。
+                                //    所以空头只认 Program.cs 那条 断|组件.字段 —— 面板上该有东西、那儿是 None。
                                 出口们.Add(new { 名 = 法.名字, 行 = "", 到 = 到实例, 到类型 = 目标类型, 条件 = e.原文 ?? "" });
                             }
                         }
@@ -304,12 +345,56 @@ namespace 图数据
                 }
             }
 
+            // 扫描出来的边里，指着的节点不在库里的，才是空头。
+            // 主要来源是 Program.cs 那条 断|组件.字段（面板上槽是 None）。
+            // ⚠️ 别把「到不了场景实例」当断链 —— 引擎组件（Rigidbody/Renderer…）本来就不建节点，
+            //    实测 19 条里 18 条是这种假警报，红色一旦乱亮就不值钱了。
+            foreach (var e in 边们)
+            {
+                if (节点们.ContainsKey(e.到)) continue;
+                记空头(e.自, e.原文 ?? e.到, e.种类);
+            }
+
+            // 摆位：接在孤岛下面。孤岛占了几行，空头就往下让几行。
+            var 孤岛列0 = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Max(1, 节点列表.Count(n => n.类型 == "脚本")))));
+            var 空头列 = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Max(1, 空头们.Count))));
+            var 空头起y = 130 + 逐行高.Sum() + 格缝
+                        + (孤岛们.Count > 0 ? ((孤岛们.Count - 1) / 孤岛列0 + 1) * 200 : 0);
+            var 空头出 = 空头们.Select((条, i) => new
+            {
+                条.id,
+                条.自,
+                条.组件,
+                条.字段,
+                条.种类,
+                条.申诉,
+                名 = 条.组件.Split('.').Last() + "." + 条.字段,
+                x = 90 + (i % 空头列) * 格宽,
+                y = 空头起y + (i / 空头列) * 150,
+            }).ToArray();
+
+            // 申诉成「它其实连到谁」的，接成一条线。
+            // 用虚线画、跟扫描出来的线区分开：那些是扫出来的事实，这条是你说的。
+            var 人线们 = new List<object>();
+            foreach (var e in 边们)
+            {
+                var 口 = 断口(e.自, e.原文 ?? e.到, e.种类);
+                if (!申诉.TryGetValue(口, out var 答)) continue;
+                if (答.动作 != "连到" || string.IsNullOrEmpty(答.目标)) continue;
+                人线们.Add(new { 自 = 落点(e.自), 到 = 答.目标, 说明 = e.原文 ?? "" });
+            }
+
             return (new
             {
                 实例们 = 实例们.ToArray(),
-                空头们 = Array.Empty<object>(),
+                空头们 = 空头出,
                 孤岛们 = 孤岛们.ToArray(),
                 线 = 线们.ToArray(),
+                人线们 = 人线们.ToArray(),
+                // 全量申诉，包括「隐藏」的 —— 那种连空头框都不出，图上没有地方撤销它。
+                // 左栏要靠它列出来，不然误报一次就再也改不回来了。
+                申诉们 = 申诉.Select(kv => new { id = kv.Key, 动作 = kv.Value.动作, 目标 = kv.Value.目标 })
+                            .OrderBy(x => x.id, StringComparer.Ordinal).ToArray(),
             }, 实例们.Count);
         }
 
@@ -320,6 +405,27 @@ namespace 图数据
             foreach (var kv in 被引)
                 if (kv.Key.StartsWith(物体id + ".", StringComparison.Ordinal)) n += kv.Value;
             return n;
+        }
+
+        // ── 断口 · 空头 ──────────────────────────────────────────
+        //
+        // 断口身份 = 组件 + 字段 + 种类。**故意不带行号** ——
+        // 代码挪一行就换身份的话，你申诉过的「这个不用管」下次就不算数了。
+        public static string 断口(string 自, string 字段, string 种类) => 自 + "|" + 字段 + "|" + 种类;
+
+        public static Dictionary<string, (string 动作, string 目标)> 读申诉(SqliteConnection 连)
+        {
+            var 表 = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+            try
+            {
+                using var 命 = 连.CreateCommand();
+                命.CommandText = "SELECT id, 动作, 目标 FROM 申诉";
+                using var 读 = 命.ExecuteReader();
+                while (读.Read())
+                    表[读.GetString(0)] = (读.GetString(1), 读.IsDBNull(2) ? null : 读.GetString(2));
+            }
+            catch { /* 老库还没建申诉表 —— 当作一条申诉都没有 */ }
+            return 表;
         }
 
         // 关键一步：把「方法 → 类型」落到「组件 → 组件」。

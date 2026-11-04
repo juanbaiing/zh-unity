@@ -295,6 +295,27 @@
   .孤岛框{border-color:var(--bad)!important;border-style:dashed!important;
     background:color-mix(in srgb, var(--bad) 8%, var(--panel))}
   .孤岛框 .实例名{color:var(--bad)}
+  /* 空头：某个脚本往外伸手，那头是空的。
+     跟孤岛不是一回事 —— 孤岛是「没人用它」，空头是「它要用的东西不在」。
+     两种都不报错、不打日志，所以只能靠看。 */
+  .空头框{border-color:var(--bad)!important;border-style:dashed!important;
+    background:color-mix(in srgb, var(--bad) 10%, var(--panel))}
+  .空头框 .实例名{color:var(--bad)}
+  /* 申诉过的「正常」：误报，框留着不再喊，但也不藏 ——
+     藏了就变成「我以为没事」和「它悄悄消失」分不清。 */
+  .空头框.误报{border-color:var(--字4)!important;border-style:dotted!important;
+    background:var(--panel)}
+  .空头框.误报 .实例名{color:var(--字3)}
+  /* 右键菜单 */
+  .右键单{position:fixed;z-index:9000;min-width:200px;padding:4px;border-radius:6px;
+    background:var(--panel);border:1px solid var(--line);box-shadow:0 8px 24px #0009;
+    font-size:var(--字正文);max-height:60vh;overflow:auto}
+  .右键单 .项{padding:6px 10px;border-radius:4px;cursor:pointer;color:var(--text);
+    white-space:nowrap}
+  .右键单 .项:hover{background:var(--line);color:var(--字1)}
+  .右键单 .项.险:hover{background:var(--错底);color:var(--bad)}
+  .右键单 .分{height:1px;margin:4px 6px;background:var(--line)}
+  .右键单 .注{padding:4px 10px 6px;color:var(--字4);font-size:var(--字标);max-width:260px}
   /* 左边栏的脚本索引 */
   #脚本索引{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;
     max-height:42%;overflow:auto}
@@ -427,6 +448,7 @@
 <main>
   <aside class="palette">
     <div id="脚本索引"></div>
+    <div id="申诉区"></div>
     <h2>点一下加块</h2>
     <div id="palette"></div>
   </aside>
@@ -3892,6 +3914,10 @@ if (有壳()) {
     } else if (d.命令 === '布局存好了') {
       // 静默 —— 拖完每次都存，弹提示会烦
       console.log('[布局] 已存');
+    } else if (d.命令 === '申诉存好了') {
+      // 申诉改了图的样子（空头框可能该消失/变灰/接上线），重拉一次
+      console.log('[申诉] 已存', d.id, d.动作);
+      拉关系图();
     } else if (d.命令 === '出错') {
       // ⚠️ 别用 alert。它会阻塞整个页面，一个错误就把界面卡死，
       // 连「再点一次」都点不了。写成右上角的提示条就行。
@@ -3934,6 +3960,9 @@ let 当前画布 = null;   // null = 用 世界
 const 网 = {
   开: false,
   实例们: [],          // 后端给的原样数据
+  空头们: [],          // 面板上该有东西、那儿是空的（断链）
+  孤岛们: [],
+  人线们: [],          // 你在空头框上右键指定的连接 —— 虚线，跟扫描的线分开
   位置: new Map(),     // id → { x, y }，拖过之后就记在这儿
   层: null,
   线层: null,
@@ -3973,9 +4002,14 @@ function 画网(图) {
 
   网.层.textContent = '';
   网.孤岛们 = Array.isArray(图.孤岛们) ? 图.孤岛们 : [];
+  网.空头们 = Array.isArray(图.空头们) ? 图.空头们 : [];
+  网.人线们 = Array.isArray(图.人线们) ? 图.人线们 : [];
+  网.申诉们 = Array.isArray(图.申诉们) ? 图.申诉们 : [];
   for (const 实 of 网.实例们) 建实例框(实);
   for (const 孤 of 网.孤岛们) 建孤岛框(孤);
+  for (const 空 of 网.空头们) 建空头框(空);
   画脚本索引();
+  画申诉区();
   // 窗口尺寸可能变过，重算一遍长宽比
   窗口改了就重排();
   画线();
@@ -3992,8 +4026,8 @@ function 窗口改了就重排() {
   for (const el of document.querySelectorAll('.实例框')) {
     // 正在编辑的那个框由开窗时定死尺寸，别拿"高 × 比例"去改它
     if (el.querySelector(':scope > .实例体.编辑中')) continue;
-    // 孤岛框也带着 .实例框 的类，但它不是场景实例，宽度是自己定的 —— 别重算
-    if (el.classList.contains('孤岛框')) continue;
+    // 孤岛框 / 空头框也带着 .实例框 的类，但它们不是场景实例，宽度是自己定的 —— 别重算
+    if (el.classList.contains('孤岛框') || el.classList.contains('空头框')) continue;
     // ⚠️ 必须先把宽度放开再量高度。
     //    不放开的话，宽度还是上一轮算的值，文字换行方式跟着宽度走，
     //    量出来的高度就是旧形状下的高度 —— 一路叠下去框会越来越歪
@@ -4064,6 +4098,213 @@ function 建孤岛框(孤) {
   });
 
   网.层.appendChild(el);
+}
+
+// 空头：脚本往外伸手，那头是空的（面板上那个槽是 None）。
+//
+// 这类错误在 Unity 里完全静默 —— 不报错、不打日志，跑起来功能集体失效，
+// 人只能靠「逐一比对历史版本」才发现。所以它必须出现在图上，而且得刺眼。
+//
+// 误报是必然的：运行时才赋值的引用，扫描器看不出来。
+// 所以右键能申诉 —— 三种处理都写库，重扫不丢。
+function 建空头框(空) {
+  let 位 = 网.位置.get(空.id);
+  if (!位) {
+    // 第一次摆：这个口要是长在场上某个实例身上，就贴着那个实例站。
+    // 断口离源越远越没用 —— 人看着某个物体时，它缺什么应该就在旁边。
+    const 源位 = 空.自 ? 网.位置.get(空.自) : null;
+    位 = 源位 ? { x: 源位.x + 400, y: 源位.y + 70 } : { x: 空.x || 0, y: 空.y || 0 };
+    网.位置.set(空.id, 位);
+  }
+  const el = document.createElement('div');
+  el.className = '实例框 空头框' + (空.申诉 === '正常' ? ' 误报' : '');
+  el.dataset.id = 空.id;
+  el.style.left = 位.x + 'px';
+  el.style.top = 位.y + 'px';
+  el.style.width = '220px';
+  el.style.height = '80px';
+
+  const 头 = document.createElement('div');
+  头.className = '实例头';
+  const 名 = document.createElement('span');
+  名.className = '实例名';
+  名.textContent = 空.名 || 空.字段 || 空.id;
+  const 签 = document.createElement('span');
+  签.className = '实例签';
+  签.textContent = 空.申诉 === '正常' ? '已申诉' : '缺接应';
+  头.appendChild(名); 头.appendChild(签);
+  el.appendChild(头);
+
+  const 体 = document.createElement('div');
+  体.className = '实例体';
+  const 说 = document.createElement('div');
+  说.className = '实例脚';
+  说.style.borderTop = '0';
+  说.textContent = 空.申诉 === '正常'
+    ? '你申诉过这里没问题'
+    : '这个位子没人来接 —— 右键可以告诉我它指谁';
+  体.appendChild(说);
+  el.appendChild(体);
+
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    开申诉菜单(空, e);
+  });
+
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('.编钮')) return;
+    // 跟孤岛框同一个坑：不挡就会冒泡到舞台，整张网跟着平移，看着像抓不住
+    e.preventDefault();
+    e.stopPropagation();
+    const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
+    const 移 = ev => {
+      位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
+      位.y = Math.round(起.oy + (ev.clientY - 起.y) / (视.z || 1));
+      el.style.left = 位.x + 'px';
+      el.style.top = 位.y + 'px';
+      画线();
+    };
+    const 停 = () => {
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+      存布局();
+    };
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+
+  网.层.appendChild(el);
+}
+
+// ── 申诉菜单 ──────────────────────────────────────────────
+// 三个选项都是「你说的话」，不是猜的，所以全部落库：
+//   指定连接对象 → 它其实指向谁（连上就不算断了）
+//   正常显示     → 误报，别再喊，但框留着（藏了就成了「悄悄消失」）
+//   不显示       → 误报，而且不想看见
+function 关右键单() {
+  const 旧 = document.getElementById('右键单');
+  if (旧) 旧.remove();
+}
+
+function 做右键单() {
+  关右键单();
+  const 单 = document.createElement('div');
+  单.className = '右键单';
+  单.id = '右键单';
+  document.body.appendChild(单);
+  return 单;
+}
+
+function 摆右键单(单, e) {
+  const r = 单.getBoundingClientRect();
+  单.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - r.width - 8)) + 'px';
+  单.style.top = Math.max(8, Math.min(e.clientY, window.innerHeight - r.height - 8)) + 'px';
+}
+
+function 加右键项(单, 字, 事, 险) {
+  const 项 = document.createElement('div');
+  项.className = '项' + (险 ? ' 险' : '');
+  项.textContent = 字;
+  项.addEventListener('click', ev => {
+    ev.stopPropagation();
+    关右键单();
+    事();
+  });
+  单.appendChild(项);
+  return 项;
+}
+
+function 开申诉菜单(空, e) {
+  const 单 = 做右键单();
+
+  const 注 = document.createElement('div');
+  注.className = '注';
+  注.textContent = String(空.组件 || '').split('|').pop() + ' · ' + (空.字段 || '');
+  单.appendChild(注);
+
+  加右键项(单, '它其实指向谁…', () => 开选目标(空, e));
+  加右键项(单, '正常显示（这是误报）', () => 发申诉(空.id, '正常'));
+  加右键项(单, '不显示', () => 发申诉(空.id, '隐藏'), true);
+  if (空.申诉) {
+    单.appendChild(Object.assign(document.createElement('div'), { className: '分' }));
+    加右键项(单, '撤销申诉', () => 发申诉(空.id, '撤销'));
+  }
+  摆右键单(单, e);
+}
+
+function 开选目标(空, e) {
+  const 单 = 做右键单();
+  const 注 = document.createElement('div');
+  注.className = '注';
+  注.textContent = '这个口应该接到谁？选了就连上线，不再报断';
+  单.appendChild(注);
+  if (!网.实例们.length) {
+    加右键项(单, '（场上还没有实例）', () => {}, true);
+  }
+  for (const 实 of 网.实例们) {
+    加右键项(单, 实.名 || 实.id, () => 发申诉(空.id, '连到', 实.id));
+  }
+  摆右键单(单, e);
+}
+
+function 发申诉(id, 动作, 目标) {
+  if (!有壳()) {
+    console.warn('[申诉] 没有壳，存不下来 ——', id, 动作, 目标);
+    return;
+  }
+  window.chrome.webview.postMessage({ 命令: '存申诉', id, 动作, 目标: 目标 || null });
+}
+
+// 点别处 / 按 Esc 关菜单。capture 阶段收，免得被别处的 stopPropagation 吞掉。
+document.addEventListener('pointerdown', e => {
+  const 单 = document.getElementById('右键单');
+  if (单 && !单.contains(e.target)) 关右键单();
+}, true);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') 关右键单();
+});
+
+
+// 已申诉的口。
+//
+// 为什么要有这一块：申诉成「隐藏」或「连到」之后，空头框就从图上消失了 ——
+// 没框就没地方右键，撤销不回来。误报一次就永久错下去，这不行。
+// 所以凡是你说过话的断口，都在这里留一行，随时能撤。
+function 画申诉区() {
+  const 盒 = document.getElementById('申诉区');
+  if (!盒) return;
+  盒.textContent = '';
+  const 们 = 网.申诉们 || [];
+  if (!们.length) return;
+  const 头 = document.createElement('div');
+  头.className = '索引头';
+  头.innerHTML = '<span>已申诉</span><span>' + 们.length + '</span>';
+  盒.appendChild(头);
+  for (const 申 of 们) {
+    const 项 = document.createElement('div');
+    项.className = '索引项';
+    const 名 = String(申.id).split('|');
+    // id = 组件|字段|种类。组件可能自带前缀，从右往左取
+    const 字 = document.createElement('span');
+    字.textContent = (名.length >= 3 ? 名[名.length - 2] : 申.id);
+    项.title = 申.id;
+    项.appendChild(字);
+    const 尾 = document.createElement('span');
+    尾.className = '挂';
+    尾.textContent = 申.动作 === '连到'
+      ? '→ ' + String(申.目标 || '').split('|').pop().split('.').pop()
+      : 申.动作;
+    项.appendChild(尾);
+    项.addEventListener('click', () => 发申诉(申.id, '撤销'));
+    盒.appendChild(项);
+  }
+  const 说 = document.createElement('div');
+  说.className = '索引空';
+  说.style.paddingTop = '0';
+  说.textContent = '点一行撤销';
+  盒.appendChild(说);
 }
 
 // 左边栏的「所有脚本」索引。点一下把视野对准那个框 ——
@@ -4268,6 +4509,54 @@ function 画线() {
         用++;
       }
     }
+  }
+
+  // 人指定的线：你在空头框上右键说「它其实连到谁」。
+  // 用虚线画 —— 扫描出来的那些是事实，这条是你说的，得一眼分得开。
+  for (const 线 of 网.人线们 || []) {    const 源 = 框位.get(线.自);
+    const 的 = 框位.get(线.到);
+    if (!源 || !的) continue;
+    const x1 = 源.x + 源.w, y1 = 源.y + 实例头高 + 8;
+    const x2 = 的.x, y2 = 的.y + 的.h / 2;
+    const mx = (x1 + x2) / 2;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 'var(--cn)');
+    p.setAttribute('stroke-width', '1.4');
+    p.setAttribute('stroke-dasharray', '6 4');
+    p.setAttribute('opacity', '0.85');
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    t.textContent = '你指定的连接：' + (线.说明 || '');
+    p.appendChild(t);
+    层.appendChild(p);
+    const 头 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    头.setAttribute('d', `M ${x2} ${y2} l -8 -4 l 0 8 z`);
+    头.setAttribute('fill', 'var(--cn)');
+    层.appendChild(头);
+  }
+
+  // 空头：从源实例伸出去，到那个空框为止。
+  // 不画箭头 —— 它本来就是「接不上的那一截」，画个箭头就成接上了。
+  for (const 空 of 网.空头们 || []) {
+    if (空.申诉 === '正常') continue;   // 你说是误报的，就别再画这根刺
+    const 源 = 框位.get(空.自);
+    const 的 = 框位.get(空.id);
+    if (!源 || !的) continue;
+    const x1 = 源.x + 源.w, y1 = 源.y + 实例头高 + 24;
+    const x2 = 的.x, y2 = 的.y + 的.h / 2;
+    const mx = (x1 + x2) / 2;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 'var(--bad)');
+    p.setAttribute('stroke-width', '1.3');
+    p.setAttribute('stroke-dasharray', '3 5');
+    p.setAttribute('opacity', '0.75');
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    t.textContent = (空.字段 || '') + ' —— 这里没有接应';
+    p.appendChild(t);
+    层.appendChild(p);
   }
 }
 

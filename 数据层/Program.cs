@@ -27,6 +27,9 @@ namespace 数据层
         private const string 预制体树 = "预制体|";
         private const string 代码树 = "代码|";
         private const string 内置树 = "内置|";
+        // 空头身份：边的「到」用这个前缀，就永远进不了节点表 ——
+        // 组装画布靠「到不在节点表里」认出它是个断口，而不是新编一个记号。
+        private const string 断头前缀 = "断|";
 
         private static int Main(string[] 参数)
         {
@@ -245,9 +248,19 @@ namespace 数据层
                         foreach (var r in 引用们.EnumerateObject())
                         {
                             var 目标 = r.Value.GetString() ?? "";
-                            if (目标.Length == 0) continue;   // 空引用不画线，但记着
-                            var 目标id = 解析引用(目标, 树名, 根名, 脚本表);
-                            插边(连, 务, 计, 组件id, 目标id, "引用", "扫描", null, r.Name);
+                            // 空引用：Unity 面板上那个槽是 None。
+                            //
+                            // 以前这里是 `continue` —— 注释写着「但记着」，其实什么也没记。
+                            // 结果最要命的那种 bug 在图上完全隐形：预制体上的脚本被删掉，
+                            // 引用变成 None，不报错、不打日志，跑起来功能集体失效，
+                            // 人只能靠"逐一比对历史版本"才发现（痛点调研 §1.1）。
+                            //
+                            // 现在留一条到不了任何节点的边，身份是 断|组件.字段。
+                            // 它进不了节点表，所以组装画布时会被当成"空头"画出来。
+                            var 到id = 目标.Length > 0
+                                ? 解析引用(目标, 树名, 根名, 脚本表)
+                                : 断头前缀 + 组件id + "." + r.Name;
+                            插边(连, 务, 计, 组件id, 到id, "引用", "扫描", null, r.Name);
                         }
                     }
                 }

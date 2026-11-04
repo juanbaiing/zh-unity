@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS 布局 (
     收起 INTEGER NOT NULL DEFAULT 0
 );
 
+-- 断口的申诉：扫描说「这里少个接应」，你说不是 —— 记在这儿。
+-- 重灌数据不会动这张表，跟布局一样，是你的话不是扫出来的话。
+--
+-- 三种动作：
+--   连到  你说它其实指向谁 → 出图时改成一条正常的线
+--   正常  目标真没有，但这是误报 → 框留着，不标红
+--   隐藏  这是误报，而且不想看见 → 不出这个框
+CREATE TABLE IF NOT EXISTS 申诉 (
+    id    TEXT PRIMARY KEY,       -- 断口的身份（自|字段|种类）
+    动作  TEXT NOT NULL,          -- 连到 | 正常 | 隐藏
+    目标  TEXT,                   -- 连到时，指向谁
+    时间  TEXT
+);
+
 -- 这份库是谁、什么时候扫的
 CREATE TABLE IF NOT EXISTS 元信息 (
     键 TEXT PRIMARY KEY,

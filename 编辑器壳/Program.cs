@@ -522,6 +522,54 @@ namespace ZhEditorShell
                                 return;
                             }
 
+                            // 断口的申诉：右键空头框 → 连到 / 正常 / 隐藏。
+                            //
+                            // 扫描说「这个槽是空的」，可它有时候是误报（运行时才赋值的引用），
+                            // 有时候你知道它其实指谁。这两种话只有你能说，所以记在 申诉 表 ——
+                            // 跟 布局 一样，重灌数据不动它：那是你说的话，不是扫出来的话。
+                            if (命令 == "存申诉")
+                            {
+                                var 资源 = 读目录();
+                                if (资源 == null) return;
+                                var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
+                                var 库 = Path.Combine(项目根, ".zh-bridge", "关系.db");
+                                if (!File.Exists(库)) return;
+
+                                try
+                                {
+                                    var id = 根.GetProperty("id").GetString() ?? "";
+                                    var 动作 = 根.GetProperty("动作").GetString() ?? "";
+                                    var 目标 = 根.TryGetProperty("目标", out var 目) ? 目.GetString() : null;
+                                    if (id.Length == 0) { 回话(网页, new { 命令 = "出错", 说 = "申诉缺 id" }); return; }
+
+                                    using var 连 = new SqliteConnection($"Data Source={库};Mode=ReadWrite");
+                                    连.Open();
+                                    using var 命 = 连.CreateCommand();
+                                    if (动作 == "撤销")
+                                    {
+                                        命.CommandText = "DELETE FROM 申诉 WHERE id = $id";
+                                        命.Parameters.AddWithValue("$id", id);
+                                    }
+                                    else
+                                    {
+                                        命.CommandText =
+                                            "INSERT INTO 申诉(id, 动作, 目标, 时间) VALUES($id, $动作, $目标, $时间) " +
+                                            "ON CONFLICT(id) DO UPDATE SET 动作 = $动作, 目标 = $目标, 时间 = $时间";
+                                        命.Parameters.AddWithValue("$id", id);
+                                        命.Parameters.AddWithValue("$动作", 动作);
+                                        命.Parameters.AddWithValue("$目标", (object?)目标 ?? DBNull.Value);
+                                        命.Parameters.AddWithValue("$时间", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                    }
+                                    命.ExecuteNonQuery();
+                                    回话(网页, new { 命令 = "申诉存好了", id, 动作 });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "存申诉失败：" + ex.Message });
+                                }
+                                return;
+                            }
+
                             // 一次把整个 Unity 项目里的脚本全转成块。
                             // 一个个选文件不现实 —— 一个项目几十个脚本。
                             if (命令 == "导入项目")

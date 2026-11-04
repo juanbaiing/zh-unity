@@ -25,6 +25,7 @@ public class 鼠 {
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool on);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   public const uint 下 = 0x0002, 上 = 0x0004, 滚 = 0x0800;
+  public const uint 右下 = 0x0008, 右上 = 0x0010;
 
   public static bool 抢前台(IntPtr h) {
     if (GetForegroundWindow() == h) return true;
@@ -84,6 +85,17 @@ switch ($动作) {
     Start-Sleep -Milliseconds 30
     移到 $x $y
     Write-Output "移 ($x,$y)"
+  }
+  '右' {
+    # 右键单击。空头框的「误报申诉」菜单靠它 —— 这个必须是真的右键，
+    # WM_RBUTTONDOWN 走系统输入管线，页面的 contextmenu 才会带着正确的坐标来。
+    $x, $y = $数[0], $数[1]
+    移到 $x $y
+    Start-Sleep -Milliseconds 120
+    [鼠]::mouse_event([鼠]::右下, 0, 0, 0, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 90
+    [鼠]::mouse_event([鼠]::右上, 0, 0, 0, [IntPtr]::Zero)
+    Write-Output "右 ($x,$y)"
   }
   '点' {
     $x, $y = $数[0], $数[1]
