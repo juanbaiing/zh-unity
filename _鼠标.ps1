@@ -18,12 +18,37 @@ public class 鼠 {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, int d, IntPtr e);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
   public const uint 下 = 0x0002, 上 = 0x0004, 滚 = 0x0800;
 }
 "@
 
+# ⚠️ 抢前台。直接 SetForegroundWindow 会被「前台锁定」挡住 ——
+#    实测调用之后窗口仍然不是前台，鼠标事件全落到别的窗口上，
+#    页面连一个 mousemove 都收不到。表现是「鼠标动了但页面没反应」，
+#    很容易误判成页面自己的毛病。
+#    标准解法：先模拟按一下 ALT 解开锁定，再 SetForegroundWindow。
 $proc = Get-Process -Name "中文套式编辑器" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($proc) { [鼠]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null; Start-Sleep -Milliseconds 300 }
+if ($proc) {
+  $h = $proc.MainWindowHandle
+  if ([鼠]::GetForegroundWindow() -ne $h) {
+    [鼠]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)   # ALT down
+    [鼠]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)   # ALT up
+    [鼠]::SetForegroundWindow($h) | Out-Null
+    Start-Sleep -Milliseconds 400
+    if ([鼠]::GetForegroundWindow() -ne $h) {
+      # 还抢不到就退一步：最小化再还原，这会把窗口顶到最前
+      [鼠]::ShowWindow($h, 6) | Out-Null
+      Start-Sleep -Milliseconds 150
+      [鼠]::ShowWindow($h, 9) | Out-Null
+      Start-Sleep -Milliseconds 400
+    }
+    if ([鼠]::GetForegroundWindow() -ne $h) { Write-Warning "抢前台失败 —— 下面这些鼠标动作大概率落不到编辑器上" }
+  }
+  Start-Sleep -Milliseconds 200
+}
 
 function 移到($x, $y) { [鼠]::SetCursorPos($x, $y) | Out-Null; Start-Sleep -Milliseconds 8 }
 
