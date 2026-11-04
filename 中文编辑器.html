@@ -3991,6 +3991,8 @@ function 窗口改了就重排() {
   for (const el of document.querySelectorAll('.实例框')) {
     // 正在编辑的那个框由开窗时定死尺寸，别拿"高 × 比例"去改它
     if (el.querySelector(':scope > .实例体.编辑中')) continue;
+    // 孤岛框也带着 .实例框 的类，但它不是场景实例，宽度是自己定的 —— 别重算
+    if (el.classList.contains('孤岛框')) continue;
     // ⚠️ 必须先把宽度放开再量高度。
     //    不放开的话，宽度还是上一轮算的值，文字换行方式跟着宽度走，
     //    量出来的高度就是旧形状下的高度 —— 一路叠下去框会越来越歪
