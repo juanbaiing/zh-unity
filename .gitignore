@@ -83,3 +83,6 @@ zhbridge-check/obj/
 # .NET 构建产物（里面会写进本机绝对路径）
 demo/bin/
 demo/obj/
+
+# 私人对话记录，不进仓库
+_用户原话.md
