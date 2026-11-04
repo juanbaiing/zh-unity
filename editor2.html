@@ -4635,6 +4635,12 @@ function 画线() {
   层.textContent = '';
   const 框位 = new Map();
   for (const el of 网.层.querySelectorAll('.实例框')) {
+    // ⚠️ 正在开窗的那个框**不算框**。
+    //    开窗() 会把它的 width/height 改成「屏幕 92%」，好让里面的画布够大 ——
+    //    于是这一个框就盖住了整个画布。要是还把它算成墙，每条线的端点都落在它内部，
+    //    libavoid 的 findPath 起点在障碍里，16 条边**全部**返回退化路径（只有起终点），
+    //    屏幕上就是「一开窗，所有连线都直愣愣穿过框」。
+    if (el.querySelector(':scope > .实例体.编辑中')) continue;
     框位.set(el.dataset.id, { x: parseFloat(el.style.left) || 0, y: parseFloat(el.style.top) || 0,
       w: el.offsetWidth, h: el.offsetHeight });
   }
@@ -4789,32 +4795,33 @@ function 画线() {
   // 松手（pointerup）会再画一次，那一次走完整算法。
   // 这是编辑器里的常规做法：拖动降级，静止精确。
   const 可算 = 边们.length && window.libavoided && !网.拖中;
+  // 太小的不算障碍。
+  // Unity 组件口是钉在框右肩上的 16px 高小标签（「Rigidbody」「Transform」…），
+  // 26 个框里 18 个是它。把它们当墙，线就会为了躲一块 16px 的标签绕出 70px 的弯 ——
+  // 而人眼根本看不出「这里挡了一下」，只看到松手瞬间线跳了一下。
+  // 真实例框最矮 104px，跟 16px 差了一整档，这条线画在 30 上够安全。
+  const 是墙 = (id, b) => Math.min(b.w, b.h) >= 30;
+  // 这些数字就是「好不好看」本身。
+  // ⚠️ 画法从直角折线改成曲线之后，bendPenalty 必须跟着降 ——
+  //    直角折线上每个拐弯都是一个刺眼的折点，罚得重是对的；
+  //    曲线拐弯本来就顺，再罚重它就会为了少拐一次而绕出去一大圈。
+  //    （实测 320 → 出图是满屏大回环）
+  const 路由选项 = {
+    obstacleMargin: 8,
+    edgeSpacing: 5,
+    bendPenalty: 70,
+    crossingPenalty: 60,
+    lengthPenalty: 1,
+  };
+  const 障碍物 = ([id, b]) => ({ id, x: b.x, y: b.y, width: b.w, height: b.h });
   if (可算) {
-    // 障碍 = 别的框。源框和目标框不算 —— 口就长在它们里面，不让穿等于自断起终点。
+    // 第一趟：障碍 = 别的框。源框和目标框不算 —— 口就长在它们里面，不让穿等于自断起终点。
     const 站边 = new Set(边们.flatMap(e => [e.自, e.到]));
-    // 太小的不算障碍。
-    // Unity 组件口是钉在框右肩上的 16px 高小标签（「Rigidbody」「Transform」…），
-    // 26 个框里 18 个是它。把它们当墙，线就会为了躲一块 16px 的标签绕出 70px 的弯 ——
-    // 而人眼根本看不出「这里挡了一下」，只看到松手瞬间线跳了一下。
-    // 真实例框最矮 104px，跟 16px 差了一整档，这条线画在 30 上够安全。
-    const 是墙 = (id, b) => !站边.has(id) && Math.min(b.w, b.h) >= 30;
     try {
       路由 = window.libavoided.routeEdges({
-        obstacles: [...框位].filter(([id, b]) => 是墙(id, b))
-          .map(([id, b]) => ({ id, x: b.x, y: b.y, width: b.w, height: b.h })),
+        obstacles: [...框位].filter(([id, b]) => 是墙(id, b) && !站边.has(id)).map(障碍物),
         edges: 边们.map(e => ({ id: e.id, sourcePoint: e.源点, targetPoint: e.终点 })),
-      }, {
-        // 这些数字就是「好不好看」本身。
-        // ⚠️ 画法从直角折线改成曲线之后，bendPenalty 必须跟着降 ——
-        //    直角折线上每个拐弯都是一个刺眼的折点，罚得重是对的；
-        //    曲线拐弯本来就顺，再罚重它就会为了少拐一次而绕出去一大圈。
-        //    （实测 320 → 出图是满屏大回环）
-        obstacleMargin: 8,
-        edgeSpacing: 5,
-        bendPenalty: 70,
-        crossingPenalty: 60,
-        lengthPenalty: 1,
-      });
+      }, 路由选项);
     } catch (错) {
       路由 = null;
       console.warn('libavoid 走线失败，退回直连：', 错 && 错.message);
@@ -4826,6 +4833,43 @@ function 画线() {
       const sec = e.sections && e.sections[0];
       if (!sec) continue;
       路表.set(e.id, [sec.startPoint, ...(sec.bendPoints || []), sec.endPoint]);
+    }
+  }
+
+  // 第二趟（只补算穿了的那几条）：
+  // 第一趟的站边是**全局**的 —— 某个框只要在**任何一条**边上当过源或目标，
+  // 它就从**所有**边的障碍集里消失了。于是 `coin→Cube` 能大摇大摆穿过 `Main Camera`
+  // （Main Camera 挂着 CameraFollow / EnemySpawner，是别条线的站边）。
+  //
+  // 要修就得「逐条只排除自己的源和目标」，可 libavoid 一次只吃一张障碍表。
+  // 全图逐条重算 = 16 × 130ms，没法每帧跑。所以只补算**第一趟还是穿了第三框**的那几条，
+  // 通常 0~3 条。
+  if (可算 && 路表.size) {
+    const 补算 = [];
+    for (const e of 边们) {
+      const 路 = 路表.get(e.id);
+      if (!路 || 路.length < 2) continue;
+      if (!撞了第三框(路.map(p => [p.x, p.y]), 框位, e.自, e.到)) continue;
+      补算.push(e);
+    }
+    for (const e of 补算) {
+      try {
+        // ⚠️ 除了自己的源框/目标框，还要排除**包含这条边端点的框**。
+        //    两个实例框压在一起时（实测 coin 和 Main Camera 就压着），
+        //    端口落在两个框的公共区域里 —— 只排 id 的话，Main Camera 仍是障碍，
+        //    而起点就在它内部，findPath 的出发点在障碍里，一律返回退化路径。
+        //    端点在里面 = 它必须从这里出来，视作「自己的框」。
+        const 包着 = (b, p) => p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h;
+        const 含端点 = ([id, b]) => 包着(b, e.源点) || 包着(b, e.终点);
+        const 单 = window.libavoided.routeEdges({
+          obstacles: [...框位].filter(([id, b]) => 是墙(id, b) && id !== e.自 && id !== e.到 && !含端点([id, b])).map(障碍物),
+          edges: [{ id: e.id, sourcePoint: e.源点, targetPoint: e.终点 }],
+        }, 路由选项);
+        const sec = 单 && 单.edges && 单.edges[0] && 单.edges[0].sections && 单.edges[0].sections[0];
+        if (sec) 路表.set(e.id, [sec.startPoint, ...(sec.bendPoints || []), sec.endPoint]);
+      } catch (错) {
+        // 补算失败就保持第一趟的路线 —— 宁可穿一下，不能断线
+      }
     }
   }
 
