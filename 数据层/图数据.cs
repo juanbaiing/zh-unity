@@ -384,6 +384,26 @@ namespace 图数据
                 人线们.Add(new { 自 = 落点(e.自), 到 = 答.目标, 说明 = e.原文 ?? "" });
             }
 
+            // 大注释框：你按住右键在画布上拖出来的那块地方。存世界坐标，跟缩放无关。
+            var 注释框们 = new List<object>();
+            try
+            {
+                using var 命 = 连.CreateCommand();
+                命.CommandText = "SELECT id, 标题, x, y, 宽, 高, 色, 收起 FROM 注释框";
+                using var 读 = 命.ExecuteReader();
+                while (读.Read())
+                    注释框们.Add(new
+                    {
+                        id = 读.GetString(0),
+                        标题 = 读.IsDBNull(1) ? "" : 读.GetString(1),
+                        x = 读.GetDouble(2), y = 读.GetDouble(3),
+                        宽 = 读.GetDouble(4), 高 = 读.GetDouble(5),
+                        色 = 读.IsDBNull(6) ? "" : 读.GetString(6),
+                        收起 = 读.GetInt32(7) != 0,
+                    });
+            }
+            catch { /* 老库还没这张表 —— 当作一个框都没有 */ }
+
             return (new
             {
                 实例们 = 实例们.ToArray(),
@@ -391,6 +411,7 @@ namespace 图数据
                 孤岛们 = 孤岛们.ToArray(),
                 线 = 线们.ToArray(),
                 人线们 = 人线们.ToArray(),
+                注释框们 = 注释框们.ToArray(),
                 // 全量申诉，包括「隐藏」的 —— 那种连空头框都不出，图上没有地方撤销它。
                 // 左栏要靠它列出来，不然误报一次就再也改不回来了。
                 申诉们 = 申诉.Select(kv => new { id = kv.Key, 动作 = kv.Value.动作, 目标 = kv.Value.目标 })

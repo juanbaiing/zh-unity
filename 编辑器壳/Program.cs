@@ -522,6 +522,57 @@ namespace ZhEditorShell
                                 return;
                             }
 
+                            // 大注释框：你按住右键拖出来的那块地方。
+                            //
+                            // 全删全插，不做增量 —— 框的数量是个位数，省得写 diff。
+                            // 跟 布局 一样，重灌数据不动这张表：那是你画的，不是扫出来的。
+                            if (命令 == "存注释框")
+                            {
+                                var 资源 = 读目录();
+                                if (资源 == null) return;
+                                var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
+                                var 库 = Path.Combine(项目根, ".zh-bridge", "关系.db");
+                                if (!File.Exists(库)) return;
+
+                                try
+                                {
+                                    var 项们 = 根.GetProperty("项");
+                                    using var 连 = new SqliteConnection($"Data Source={库};Mode=ReadWrite");
+                                    连.Open();
+                                    using var 务 = 连.BeginTransaction();
+                                    using (var 清 = 连.CreateCommand())
+                                    {
+                                        清.Transaction = 务;
+                                        清.CommandText = "DELETE FROM 注释框";
+                                        清.ExecuteNonQuery();
+                                    }
+                                    foreach (var 项 in 项们.EnumerateArray())
+                                    {
+                                        using var 命 = 连.CreateCommand();
+                                        命.Transaction = 务;
+                                        命.CommandText =
+                                            "INSERT INTO 注释框(id, 标题, x, y, 宽, 高, 色, 收起) " +
+                                            "VALUES($id, $标, $x, $y, $宽, $高, $色, $收)";
+                                        命.Parameters.AddWithValue("$id", 项.GetProperty("id").GetString() ?? "");
+                                        命.Parameters.AddWithValue("$标", 项.TryGetProperty("标题", out var 标) ? 标.GetString() ?? "" : "");
+                                        命.Parameters.AddWithValue("$x", 项.GetProperty("x").GetDouble());
+                                        命.Parameters.AddWithValue("$y", 项.GetProperty("y").GetDouble());
+                                        命.Parameters.AddWithValue("$宽", 项.GetProperty("宽").GetDouble());
+                                        命.Parameters.AddWithValue("$高", 项.GetProperty("高").GetDouble());
+                                        命.Parameters.AddWithValue("$色", 项.TryGetProperty("色", out var 色) ? 色.GetString() ?? "" : "");
+                                        命.Parameters.AddWithValue("$收", 项.TryGetProperty("收起", out var 收) && 收.GetBoolean() ? 1 : 0);
+                                        命.ExecuteNonQuery();
+                                    }
+                                    务.Commit();
+                                    回话(网页, new { 命令 = "注释框存好了" });
+                                }
+                                catch (Exception ex)
+                                {
+                                    回话(网页, new { 命令 = "出错", 说 = "存注释框失败：" + ex.Message });
+                                }
+                                return;
+                            }
+
                             // 断口的申诉：右键空头框 → 连到 / 正常 / 隐藏。
                             //
                             // 扫描说「这个槽是空的」，可它有时候是误报（运行时才赋值的引用），

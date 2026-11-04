@@ -128,6 +128,44 @@ switch ($动作) {
     if ($按Shift) { [鼠]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero) }
     Write-Output "拖 ($x1,$y1) → ($x2,$y2) 上下$(if($按Shift){' +Shift'})"
   }
+  'Ctrl拖' {
+    # 按住 Ctrl 拖 —— 画布上「拉出一个大注释框」是这个手势
+    $x1, $y1, $x2, $y2 = $数[0], $数[1], $数[2], $数[3]
+    移到 $x1 $y1
+    Start-Sleep -Milliseconds 100
+    [鼠]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
+    [鼠]::mouse_event([鼠]::下, 0, 0, 0, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    $步 = 24
+    for ($i = 1; $i -le $步; $i++) {
+      $x = [int]($x1 + ($x2 - $x1) * $i / $步)
+      $y = [int]($y1 + ($y2 - $y1) * $i / $步)
+      移到 $x $y
+    }
+    Start-Sleep -Milliseconds 120
+    [鼠]::mouse_event([鼠]::上, 0, 0, 0, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
+    [鼠]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
+    Write-Output "Ctrl拖 ($x1,$y1) → ($x2,$y2)"
+  }
+  '右拖' {
+    # 右键按住拖 —— 画布上「拖出一个大注释框」是这个手势。
+    $x1, $y1, $x2, $y2 = $数[0], $数[1], $数[2], $数[3]
+    移到 $x1 $y1
+    Start-Sleep -Milliseconds 100
+    [鼠]::mouse_event([鼠]::右下, 0, 0, 0, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    $步 = 24
+    for ($i = 1; $i -le $步; $i++) {
+      $x = [int]($x1 + ($x2 - $x1) * $i / $步)
+      $y = [int]($y1 + ($y2 - $y1) * $i / $步)
+      移到 $x $y
+    }
+    Start-Sleep -Milliseconds 120
+    [鼠]::mouse_event([鼠]::右上, 0, 0, 0, [IntPtr]::Zero)
+    Write-Output "右拖 ($x1,$y1) → ($x2,$y2)"
+  }
   '滚' {
     $x, $y, $次 = $数[0], $数[1], $数[2]
     移到 $x $y

@@ -70,6 +70,27 @@ CREATE TABLE IF NOT EXISTS 申诉 (
     时间  TEXT
 );
 
+-- 大注释框：你按住右键在画布上拖出来的那个框。
+--
+-- 是「整理」，不是「分类」—— 所以它不代表任何结构关系，只是一块地方。
+-- 里面装谁，是画的时候「框的中心落在框里」算出来的，不存成员表：
+-- 这样天然支持嵌套（小框的中心在大框里，小框就属于它），也不用维护父子。
+--
+-- ⚠️ 跟 Unreal 那套的关键差别：**框不自动跟随内容伸缩**。
+--    Unreal 里框不会自己长大，一堆人天天手动拖边框；AutosizeComments 那个插件
+--    让它自动调，结果又跟缩放打架（节点尺寸随缩放变，算不准，Reactive 模式会把
+--    当时的缩放级别「快照」进去）。这里干脆不调：框是你画多大就多大。
+CREATE TABLE IF NOT EXISTS 注释框 (
+    id    TEXT PRIMARY KEY,
+    标题  TEXT,
+    x     REAL NOT NULL,
+    y     REAL NOT NULL,
+    宽    REAL NOT NULL,
+    高    REAL NOT NULL,
+    色    TEXT,
+    收起  INTEGER NOT NULL DEFAULT 0
+);
+
 -- 这份库是谁、什么时候扫的
 CREATE TABLE IF NOT EXISTS 元信息 (
     键 TEXT PRIMARY KEY,

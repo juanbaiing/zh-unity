@@ -263,8 +263,26 @@
   .孤岛提示.hidden{display:none}
   .fld.有选项{cursor:pointer}
 
-  /* ---------- 网层：Unity 场景里的实例 ----------
-     和块在同一张画布、同一套坐标里 ——「实例就是另类的代码块」。
+  /* ---------- 大注释框：你拖出来的「一趟」 ----------
+     垫在最底层当区域底色，不挡鼠标（只有标题条能被抓）。 */
+  #注释框层{position:absolute;left:0;top:0;z-index:1}
+  #线层{position:absolute;left:0;top:0;z-index:2;pointer-events:none}
+  #网层{position:absolute;left:0;top:0;z-index:3}
+
+  .注释框{position:absolute;border:1px solid #3d5064;border-radius:10px;
+    background:color-mix(in srgb, #4a6a8a 7%, transparent);
+    pointer-events:none;box-sizing:border-box}
+  .注释框 .框头{position:absolute;left:0;right:0;top:0;height:26px;
+    display:flex;align-items:center;gap:8px;padding:0 10px;
+    font-size:12px;color:#8aa2bd;cursor:move;pointer-events:auto;
+    border-bottom:1px solid color-mix(in srgb, #3d5064 60%, transparent)}
+  .注释框 .框头 .名额{margin-left:auto;color:#5d7086}
+  .注释框 .框标题{cursor:text;outline:none}
+  .注释框 .框标题:empty::before{content:'未命名';color:#3d5064}
+  .注释框.拖出中{border-style:dashed;background:color-mix(in srgb, #4a6a8a 12%, transparent)}
+  .注释框.收起{height:26px ;overflow:hidden;background:color-mix(in srgb, #4a6a8a 14%, transparent)}
+
+  /* ---------- 网层：Unity 场景里的实例 ----------     和块在同一张画布、同一套坐标里 ——「实例就是另类的代码块」。
      配色沿用网状图那套：青灰蓝 = 脚本/行为，暗绿 = 数据值，暗金 = 连线。
      框不描粗边、不加阴影 —— 靠块底和画布底那一档差浮起来。 */
   #线层{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;z-index:0}
@@ -561,6 +579,9 @@ function 缩外层(clientX, clientY, 放大) {
 let 平移 = null;
 舞台.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
+  // Ctrl 拖 = 拉大注释框，不是平移。挪窗式的 Alt 在别的系统会触发「拖窗口」，
+  // 右键更不行 —— 实测 WebView2 右键按下根本不派发 pointerdown（只有 up 和 contextmenu）。
+  if (e.ctrlKey) return;
   // 在窗户里按的，归窗户平移它自己的世界 —— 外层不许跟着动。
   // 这里不加的话，拖窗户内空白时整张网也在挪，看着就是「内外一起动」。
   // Shift 拖 = 挪外层。所以 Shift 时就算按在窗户里，也归外层管，不让开。
@@ -2324,28 +2345,224 @@ const 网 = {
   空头们: [],          // 面板上该有东西、那儿是空的（断链）
   孤岛们: [],
   人线们: [],          // 你在空头框上右键指定的连接 —— 虚线，跟扫描的线分开
+  注释框们: [],        // 你按住左键拖出来的「一趟」—— 整理用，不是分类
   位置: new Map(),     // id → { x, y }，拖过之后就记在这儿
   层: null,
   线层: null,
+  框层: null,
 };
 
 function 建网层() {
   if (网.层) return;
-  // 线在最底下，框压在线上，块压在框上
+  // 注释框是区域底色，垫在最底下；线压在它上面；实例框再压线
+  const 框层 = document.createElement('div');
+  框层.id = '注释框层';
+  世界.appendChild(框层);
+  网.框层 = 框层;
+
   const 线层 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   线层.id = '线层';
   线层.setAttribute('width', '1');
   线层.setAttribute('height', '1');
-  世界.insertBefore(线层, 世界.firstChild);
+  世界.appendChild(线层);
   网.线层 = 线层;
 
   const 层 = document.createElement('div');
   层.id = '网层';
-  世界.insertBefore(层, 世界.firstChild);
+  世界.appendChild(层);
   网.层 = 层;
 }
 
-// 一个实例框该多高：头 + 每个脚本一行 + 脚。
+// ── 大注释框 ──────────────────────────────────────────
+//
+// 按住左键在空白处拖出一块地方，「这堆是我这段时间在弄的」。
+// 是**整理**，不是分类 —— 所以它不代表任何结构关系，只是一块地方。
+//
+// 所以不建父子表：小框的中心落在大框里，它就属于大框。天然嵌套，不用维护。
+// 也因此拖动不用递归 —— 大框把里面所有东西一起挪一遍就够了，不会挪两次。
+//
+// ⚠️ 跟 Unreal 那套的关键差别：**框不跟着内容自动伸缩**。
+//    Unreal 里框不自己长大，一堆人天天手动拖边框；AutoSizeComments 让它自动调，
+//    又跟缩放打架（节点尺寸随缩放变，算不准）。这里框是你画多大就多大。
+
+function 元素的位(el) {
+  return { x: parseFloat(el.style.left) || 0, y: parseFloat(el.style.top) || 0,
+           w: el.offsetWidth, h: el.offsetHeight };
+}
+
+function 在框里(框, 位) {
+  const 心x = 位.x + 位.w / 2, 心y = 位.y + 位.h / 2;
+  return 心x > 框.x && 心x < 框.x + 框.宽 && 心y > 框.y && 心y < 框.y + 框.高;
+}
+
+// 这个框里现在装着谁（中心点判定）。运行时算，不存成员表 —— 存了会过期。
+function 框里成员(框) {
+  const 出 = [];
+  if (!网.层) return 出;
+  for (const el of 网.层.querySelectorAll('.实例框')) {
+    if (el.dataset.id === 框.id) continue;
+    if (在框里(框, 元素的位(el))) 出.push(el);
+  }
+  if (网.框层) for (const el of 网.框层.querySelectorAll('.注释框')) {
+    if (el.dataset.id === 框.id) continue;
+    if (在框里(框, 元素的位(el))) 出.push(el);
+  }
+  return 出;
+}
+
+function 存注释框() {
+  if (!有壳()) return;
+  window.chrome.webview.postMessage({
+    命令: '存注释框',
+    项: 网.注释框们.map(f => ({
+      id: f.id, 标题: f.标题 || '', x: f.x, y: f.y,
+      宽: f.宽, 高: f.高, 色: f.色 || '', 收起: !!f.收起,
+    })),
+  });
+}
+
+function 建注释框(框) {
+  const el = document.createElement('div');
+  el.className = '注释框' + (框.收起 ? ' 收起' : '');
+  el.dataset.id = 框.id;
+  el.style.left = 框.x + 'px';
+  el.style.top = 框.y + 'px';
+  el.style.width = 框.宽 + 'px';
+  el.style.height = 框.宽 ? 框.高 + 'px' : '26px';
+
+  const 头 = document.createElement('div');
+  头.className = '框头';
+  const 标 = document.createElement('span');
+  标.className = '框标题';
+  标.textContent = 框.标题 || '';
+  // 平时不可编辑，双击才进 —— 不然点在标题文字上就开始选字，框拖不动，
+  // 而且「抓哪儿能拖」会取决于标题有几个字，很随机。
+  标.contentEditable = 'false';
+  标.spellcheck = false;
+  标.addEventListener('dblclick', e => {
+    e.stopPropagation();
+    标.contentEditable = 'true';
+    标.focus();
+  });
+  标.addEventListener('blur', () => {
+    标.contentEditable = 'false';
+    框.标题 = (标.textContent || '').trim();
+    标.textContent = 框.标题;
+    存注释框();
+  });
+  标.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); 标.blur(); }
+  });
+  const 数 = document.createElement('span');
+  数.className = '名额';
+  数.textContent = 框里成员(框).length + ' 个';
+  头.appendChild(标); 头.appendChild(数);
+  el.appendChild(头);
+
+  头.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (标.contentEditable === 'true') return;   // 正在改标题
+    e.preventDefault(); e.stopPropagation();
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    const 起 = { x: e.clientX, y: e.clientY, ox: 框.x, oy: 框.y };
+    // 成员在按下那一刻定死 —— 拖的过程中框跟着动，再算会滑
+    const 员 = 框里成员(框).map(m => ({ el: m, 位: 元素的位(m), id: m.dataset.id }));
+    const 移 = ev => {
+      const z = 视.z || 1;
+      const dx = (ev.clientX - 起.x) / z, dy = (ev.clientY - 起.y) / z;
+      框.x = Math.round(起.ox + dx);
+      框.y = Math.round(起.oy + dy);
+      el.style.left = 框.x + 'px';
+      el.style.top = 框.y + 'px';
+      for (const m of 员) {
+        m.el.style.left = Math.round(m.位.x + dx) + 'px';
+        m.el.style.top = Math.round(m.位.y + dy) + 'px';
+        if (m.id) 网.位置.set(m.id, { x: Math.round(m.位.x + dx), y: Math.round(m.位.y + dy) });
+      }
+      画线();
+    };
+    const 停 = () => {
+      document.removeEventListener('pointermove', 移);
+      document.removeEventListener('pointerup', 停);
+      存布局(); 存注释框();
+    };
+    document.addEventListener('pointermove', 移);
+    document.addEventListener('pointerup', 停);
+  });
+
+  网.框层.appendChild(el);
+}
+
+function 画注释框们() {
+  if (!网.框层) return;
+  网.框层.textContent = '';
+  for (const 框 of 网.注释框们 || []) 建注释框(框);
+}
+
+// Ctrl+左键在空白处拖 = 画一个新框。
+//
+// ⚠️ 原来的设计是右键拖，实测不通：WebView2 里右键按下**不派发 pointerdown**
+//    （挂捕获监听看到的只有 pointerup / mouseup / contextmenu），所以起点永远收不到。
+//    Alt+左键也不行 —— 那是 Windows 的「拖窗口」手势。
+舞台.addEventListener('contextmenu', e => {
+  if (e.target.closest('.窗户')) return;
+  if (e.target.closest('.空头框')) return;   // 那种右键有自己的申诉菜单
+  e.preventDefault();
+});
+
+舞台.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || !e.ctrlKey) return;
+  if (e.target.closest('.窗户') || e.target.closest('.空头框')) return;
+  if (!网.开 || !网.框层) return;
+  e.preventDefault();
+
+  const 台r = 世界.getBoundingClientRect();
+  const z = 视.z || 1;
+  const 世界点 = ev => ({
+    x: (ev.clientX - 台r.left) / z,
+    y: (ev.clientY - 台r.top) / z,
+  });
+  const 起 = 世界点(e);
+
+  const 预览 = document.createElement('div');
+  预览.className = '注释框 拖出中';
+  预览.style.left = 起.x + 'px';
+  预览.style.top = 起.y + 'px';
+  预览.style.width = '0px';
+  预览.style.height = '0px';
+  网.框层.appendChild(预览);
+
+  const 移 = ev => {
+    const p = 世界点(ev);
+    const x = Math.min(起.x, p.x), y = Math.min(起.y, p.y);
+    预览.style.left = x + 'px';
+    预览.style.top = y + 'px';
+    预览.style.width = Math.abs(p.x - 起.x) + 'px';
+    预览.style.height = Math.abs(p.y - 起.y) + 'px';
+  };
+  const 停 = ev => {
+    document.removeEventListener('pointermove', 移);
+    document.removeEventListener('pointerup', 停);
+    const p = 世界点(ev);
+    const 宽 = Math.abs(p.x - 起.x), 高 = Math.abs(p.y - 起.y);
+    预览.remove();
+    // 太小的当误触，不建 —— 右键本来就容易顺手按一下
+    if (宽 < 40 || 高 < 40) return;
+    网.注释框们.push({
+      id: '框' + Date.now().toString(36),
+      标题: '',
+      x: Math.round(Math.min(起.x, p.x)),
+      y: Math.round(Math.min(起.y, p.y)),
+      宽: Math.round(宽), 高: Math.round(高),
+      收起: false,
+    });
+    画注释框们();
+    存注释框();
+  };
+  document.addEventListener('pointermove', 移);
+  document.addEventListener('pointerup', 停);
+});
+
 // 不做精细测量 —— 框里目前只有脚本名，高度是确定的。
 const 脚本行高 = 32, 实例头高 = 36, 实例脚高 = 22;
 
@@ -2377,6 +2594,8 @@ function 画网(图, 原地) {
   网.申诉们 = Array.isArray(图.申诉们) ? 图.申诉们 : [];
   for (const 实 of 网.实例们) 建实例框(实);
   for (const 孤 of 网.孤岛们) 建孤岛框(孤);
+  网.注释框们 = Array.isArray(图.注释框们) ? 图.注释框们 : [];
+  画注释框们();
 
   // 连到 Unity 内置组件的出口：目标不是用户脚本，装不进任何一行里。
   // 按你说的「还是空头」—— 给它一个空头框，写上连到哪个组件。
