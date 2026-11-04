@@ -334,11 +334,13 @@
   .编钮:hover{color:var(--字1);border-color:#6f8aa3}
   .实例体{padding:8px;display:flex;flex-direction:column;gap:4px}
   .脚本框{background:var(--脚);border-radius:4px}
-  .脚本名{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  .脚本名{display:flex;align-items:center;gap:8px;
     padding:6px 10px;color:#6f8aa3;font-size:var(--字正文);white-space:nowrap;cursor:pointer}
   .脚本名:hover{background:color-mix(in srgb, #6f8aa3 12%, transparent)}
   .脚本框.开>.脚本名{color:var(--字1)}
-  .脚本口{display:flex;gap:4px}
+  /* 名字吃掉中间的空档 —— 左边的口贴左、右边的口贴右，名字在中间 */
+  .脚本名 > .名{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .脚本口{display:flex;gap:4px;flex:0 0 auto}
   .脚本口 i{width:6px;height:6px;border-radius:50%;border:1px solid #7a6a3f;display:block}
   .实例脚{padding:4px 12px;color:var(--字4);font-size:var(--字标);
     border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -3513,23 +3515,42 @@ function 建实例框(实) {
     行.className = '脚本名';
 
     const 字 = document.createElement('span');
+    字.className = '名';
     字.textContent = s.名 || '?';
     行.appendChild(字);
 
     // 出口：每有一个向外的条件，就有一个点。你说过「每有一个向外的条件，就有一个连线节点」
+    //
+    // ⚠️ 点是**分左右两侧**的：目标在左边，点就画在行的左边；目标在右边，画在右边。
+    //
+    // 原来所有点都堆在行尾（右边）。于是 `enemy` 那八个口全在框的右侧，
+    // 可它们连的 `Cube` 在左边 —— 线只能从右边出去、绕过整个框再回来，
+    // 在画布上就是一大圈。把点放到朝向目标的那一侧，线从最近的一条边出发，
+    // 框里那一小段也最短。这是布局层的修法，走线算法再怎么调都补不回来。
     const 口数 = (s.出口 || []).length;
     if (口数) {
-      const 点们 = document.createElement('span');
-      点们.className = '脚本口';
+      const 左们 = document.createElement('span');
+      左们.className = '脚本口 左';
+      const 右们 = document.createElement('span');
+      右们.className = '脚本口 右';
+      const 我位 = 网.位置.get(实.id);
       for (let k = 0; k < 口数; k++) {
+        const 出口 = s.出口[k];
         const 点 = document.createElement('i');
+       
         // 这个点就是「连线节点」的落点 —— 线从这儿出去，不从这个实例框整条边出去。
         // 你在 b459 说的：「线只负责告知…与具体块绑定，先连到脚本边框，再连到外面」。
         点.dataset.口 = k;
-        点.title = (s.出口[k].条件 || s.出口[k].名 || '') + ' → ' + 名短(s.出口[k].到);
-        点们.appendChild(点);
+        点.title = (出口.条件 || 出口.名 || '') + ' → ' + 名短(出口.到);
+        // 判「目标在左还是在右」。拿不到目标位置就先放右边（跟原来一样）。
+        const 目标位 = 出口.到 ? 网.位置.get(出口.到) : null;
+        const 去左 = !!(我位 && 目标位 && 目标位.x < 我位.x);
+        点.dataset.侧 = 去左 ? '左' : '右';
+        (去左 ? 左们 : 右们).appendChild(点);
       }
-      行.appendChild(点们);
+      // 左组放在名字前面、右组放在后面 —— 中间的 .名 用 flex:1 吃掉空档
+      if (左们.childElementCount) 行.insertBefore(左们, 字);
+      if (右们.childElementCount) 行.appendChild(右们);
     }
     // 点脚本名 = 张开这扇窗。窗口只在够大的时候才开（见 够大()）
     框.dataset.名 = s.名 || '';
@@ -3651,6 +3672,54 @@ function 连哪边(源, 的) {
   const dB = (的.x + 的.w) - 源.x;          // 源左 → 目标右（往左要 dB<0）
   if (dB < 0) return { 往右: false, x1: 源.x, x2: 的.x + 的.w };
   return { 往右: true, x1: 源.x, x2: 的.x + 的.w };
+}
+
+// ── 连线形状（参数化贝塞尔）────────────────────────────
+//
+// 依据见 `连线调研.md`：
+//   · 交叉是可读性第一位，弯曲第二（Purchase / Ware 2003）。换算：一次交叉 ≈ 38° 弯曲。
+//   · 正交图交叉最少却最难读（Dwyer 2009）—— 所以不用直角折线。
+//   · 控制点长度这套来自 ComfyUI-NKD-Reroutes 的那 11 个参数：
+//       elasticity  短线收紧、长线张开
+//       handle 上限  不超过水平间距的一半，否则短线打 S 形折返
+//       node body   两个节点挨很近时留一点弯，线不会缩成一条边
+
+// 两边之间该伸多长（控制点到端点的距离）
+//
+// 0.34 这个系数是「Handle ceiling」：控制点不超过两端水平距离的三分之一。
+// 超过一半，短距离的线会先往外甩再折回来，看着像打了个 S 结（实测 0.5 就是这样）。
+function 控制长(x1, y1, x2, y2) {
+  const 横 = Math.abs(x2 - x1), 纵 = Math.abs(y2 - y1);
+  const 主 = Math.max(横, 纵, 1);
+  return Math.max(14, Math.min(主 * 0.34, 170));
+}
+
+function 沿向伸(向, x, y, 伸) {
+  if (向 === '左') return [x - 伸, y];
+  if (向 === '右') return [x + 伸, y];
+  if (向 === '上') return [x, y - 伸];
+  return [x, y + 伸];
+}
+
+// 起终点各朝自己那一侧伸控制点。
+function 曲线路向(x1, y1, x2, y2, 起向, 终向) {
+  const 伸 = 控制长(x1, y1, x2, y2);
+  const [c1x, c1y] = 沿向伸(起向, x1, y1, 伸);
+  const [c2x, c2y] = 沿向伸(终向, x2, y2, 伸);
+  const 数 = v => Math.round(v * 10) / 10;
+  return `M ${数(x1)} ${数(y1)} C ${数(c1x)} ${数(c1y)}, ${数(c2x)} ${数(c2y)}, ${数(x2)} ${数(y2)}`;
+}
+
+// 同一个形状采成点列 —— 判「有没有穿别人的框」用它。
+// 控制点算法必须跟 曲线路向() 一模一样，不然判的是一条线、画的是另一条。
+function 曲线点向(x1, y1, x2, y2, 起向, 终向, 段数 = 24) {
+  const 伸 = 控制长(x1, y1, x2, y2);
+  const [c1x, c1y] = 沿向伸(起向, x1, y1, 伸);
+  const [c2x, c2y] = 沿向伸(终向, x2, y2, 伸);
+  const 点 = [];
+  for (let i = 0; i <= 段数; i++)
+    点.push(贝塞尔(x1, y1, c1x, c1y, c2x, c2y, x2, y2, i / 段数));
+  return 点;
 }
 
 function 曲线路(x1, y1, x2, y2) {
@@ -4065,14 +4134,17 @@ function 画线() {
     for (const { s, k, 出口 } of 出) {
       const 的 = 框位.get(出口.到);
       const 源行 = 行表.get(实.id + '\u0001' + String(s.名 || '').replace(/\[\d+\]$/, ''));
-      const 源点们 = 源行 ? 源行.querySelectorAll('.脚本口 i') : null;
-      const 源点 = 源点们 && 源点们[k] ? 源点们[k] : (源行 || null);
+      // ⚠️ 按 data-口 找，不能按顺序取 —— 口现在分左右两组，
+      //    节点里先出现左组再出现右组，querySelectorAll 的顺序跟 k 对不上。
+      const 源点 = 源行 ? 源行.querySelector('.脚本口 i[data-口="' + k + '"]') : null;
       const 目标行 = 行表.get(出口.到 + '\u0001' + String(出口.到类型 || ''));
       if (!目标行) continue;      // 连的是 Unity 内置组件，交给下面的组件口
 
       const a = 源点 ? 换算(源点) : null;
       const b = 换算(目标行);
       const 连 = 连哪边(源, 的);
+      // 这个口画在哪一侧（建实例框时按目标方向定的）
+      const 从左侧出 = 源点 ? 源点.dataset.侧 === '左' : false;
 
       // 端点就放在**口上 / 目标行上**，不推到框边界。
       //
@@ -4082,15 +4154,22 @@ function 画线() {
       // 现在把源框和目标框从障碍里拿掉，线从口直接出发，只绕**第三个框**。
       // 这正是 Unreal Blueprint / Blender 的做法：noodle 从 pin 长出来，穿过自己那个节点。
       const 源心 = a ? { x: a.中x, y: a.中y } : { x: 源.x + 源.w / 2, y: 源.y + 源.h / 2 };
-      const 端心 = { x: b.中x, y: b.中y };
-      const 入边 = 最近边(端心, 的);
+      // 终点：目标行的**朝向线来的那一侧**。线从左边来就接行的左边缘，从右边来就接右边缘。
+      // 接行中心的话，线会先切进半个行宽再停，看着像「插进块里」。
+      const 从右来 = 源心.x >= b.中x;
+      const 端心 = { x: 从右来 ? b.右 : b.左, y: b.中y };
+      // 起向 = 口在哪一侧；终向 = 控制点朝线的来向伸（跟起向相反那侧）
+      const 起向 = 从左侧出 ? '左' : '右';
+      const 终向 = 从右来 ? '右' : '左';
 
       边们.push({
         id: 实.id + '\u0002' + 出口.到 + '\u0002' + (s.名 || '') + '\u0002' + k,
         自: 实.id, 到: 出口.到,
         题: (s.名 || '') + ' · ' + (出口.名 || '') + (出口.条件 ? ' — ' + 出口.条件 : '') + ' → ' + (出口.到类型 || ''),
-        源点: 源心, 终点: 端心,
-        朝: 入边.边 === '左' ? '左' : (入边.边 === '右' ? '右' : (入边.边 === '上' ? '上' : '下')),
+        源点: 源心, 终点: 端心, 起向, 终向,
+        // ⚠️ 箭头朝**行进方向**：线从左边来、往右扎，箭头就朝右。
+        //    这里错过一次，写成「从右来 ? 右 : 左」，箭头全反着指。
+        朝: 从右来 ? '左' : '右',
       });
     }
   }
@@ -4137,24 +4216,26 @@ function 画线() {
 
   for (const e of 边们) {
     const 路 = 路表.get(e.id);
-    // 原曲线（短、顺，就是 Unreal/Blender 那种 noodle）：起终点直连、控制点沿出口方向拉开
-    const 直路 = 密采样(曲线采样(e.源点.x, e.源点.y, e.终点.x, e.终点.y, false), 12);
-    const 直长 = 点列长度(直路);
+    // 默认：一条方向化的贝塞尔（口在哪侧就从哪侧伸控制点）
+    const 直点 = 曲线点向(e.源点.x, e.源点.y, e.终点.x, e.终点.y, e.起向, e.终向, 24);
+    const 直长 = 点列长度(直点);
 
-    let 点们 = 直路.map(p => ({ x: p[0], y: p[1] }));
+    let 点们 = 直点.map(p => ({ x: p[0], y: p[1] }));
+    let 用贝塞尔 = true;
     // ⚠️ 这里只做布尔判断、而且用早停 —— 一开始写的是「算每条线在每个框里各走了多少 px」，
     //    32 条线 × 两次 × 几百个采样点 × 26 个框，一次画线 561ms。
-    //    松手之后卡半秒，体感就是「拖完卡一下」。
-    const 直撞三 = 撞了第三框(直路, 框位, e.自, e.到);
+    const 直撞三 = 撞了第三框(直点, 框位, e.自, e.到);
     if (直撞三 && 路 && 路.length >= 2) {
       const 绕点 = 路.map(p => [p.x, p.y]);
       const 绕长 = 点列长度(绕点);
-      // 绕行短于 1.6 倍才值得：绕成两倍还不如让线直一点（Unreal 的线本来就穿节点）。
-      if (绕长 < 直长 * 1.6) 点们 = 绕点.map(p => ({ x: p[0], y: p[1] }));
+      // 绕行短于 1.6 倍才值得。绕成两倍以上，还不如让线直接穿过去 ——
+      // Unreal / Blender 的 noodle 本来就穿节点（Ware 2003：多出来的弯曲也很贵）。
+      if (绕长 < 直长 * 1.6) { 点们 = 绕点.map(p => ({ x: p[0], y: p[1] })); 用贝塞尔 = false; }
     }
     // 兜底：libavoid 没算出结果时也画，不能没线
     if (!点们 || 点们.length < 2) {
       点们 = [e.源点, { x: e.终点.x, y: e.源点.y }, e.终点];
+      用贝塞尔 = false;
     }
     // 相邻重合点去掉，否则圆角会算出 NaN
     const 清 = [];
@@ -4162,15 +4243,11 @@ function 画线() {
       const 末 = 清[清.length - 1];
       if (!末 || Math.abs(末.x - p.x) > 0.01 || Math.abs(末.y - p.y) > 0.01) 清.push(p);
     }
-    // ⚠️ 不能画成直角折线 —— 那是我第一版干的事，出来像电路板。
-    //
-    // 业内好看的那几家（Unreal Blueprint / Blender / Shader Graph / ComfyUI）
-    // 画的全是**曲线**。而避让正确的那套（libavoid）算出来的是**正交折线**。
-    // 两者不冲突：正交折线是「轨道」，曲线是「外观」——
-    //   "Curved: interpolate smooth curves through orthogonal waypoints"
-    //   "All edge styles share the same upstream routing logic through the orthogonal path builder"
-    // 所以：轨道定去哪儿，Catmull-Rom 把它揉顺。
-    const d = 样条成路(清.map(p => [p.x, p.y]));
+    // 没被挡 → 一条干净的贝塞尔（这就是 Unreal/Blender 那个形状）。
+    // 被挡且绕得不多 → libavoid 给的轨道，用 Catmull-Rom 揉顺（轨道定去哪儿，曲线是外观）。
+    const d = 用贝塞尔
+      ? 曲线路向(e.源点.x, e.源点.y, e.终点.x, e.终点.y, e.起向, e.终向)
+      : 样条成路(清.map(p => [p.x, p.y]));
     const p = 画一条(d, '#7a6a3f', 1.2, e.自, e.到);
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
     t.textContent = e.题;
