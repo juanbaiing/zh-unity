@@ -166,6 +166,7 @@
   #world{position:relative;width:2400px;height:1600px;transform-origin:0 0;
     background:radial-gradient(circle,var(--panel) 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:var(--dim);font-size:var(--字正文)}
+  #hintEmpty.警示{color:#a06060}
   #比例牌{position:absolute;right:10px;bottom:8px;font-size:var(--字正文);color:var(--dim);
     pointer-events:none;user-select:none;z-index:5}
   #去原点{position:absolute;right:10px;bottom:26px;font-size:var(--字正文);color:var(--dim);
@@ -4608,14 +4609,30 @@ function 重做() {
 
 // ---------------- 重画 ----------------
 let 画序 = 0;
+// 空画布上那句话。三种情况分开说，别让人对着一片空白猜：
+//   有块摆着     → 不显示
+//   没扫过项目   → 直说「还没扫描项目」，并告诉他在哪点
+//   扫过但没块   → 老提示「从左边点一个块开始」
+// ⚠️ 别人第一次 clone 下来就是这个状态，那不是坏了，是还没扫。
+function 刷空提示() {
+  const 提示 = document.getElementById('hintEmpty');
+  if (!提示) return;
+  if (根块们.length) { 提示.style.display = 'none'; return; }
+  提示.style.display = 'block';
+  const 没扫过 = !网.开 && !window.项目数据;
+  提示.textContent = 没扫过
+    ? '还没扫描项目 —— 点顶上的「扫描项目」，指到你的 Unity 工程里的 Assets 目录'
+    : '从左边点一个块开始';
+  提示.classList.toggle('警示', 没扫过);
+}
+
 function 重画(跳过重叠整理) {
   const 我 = ++画序;
   悬停存底.clear();
   // 拖动中的块挂在 document.body 上（见 开始拖），所以清理要扫整个文档，
   // 只扫 #world 会把那些副本留在页面里，越拖越多。
   [...document.querySelectorAll('.blk')].forEach(e => e.remove());
-  const 提示 = document.getElementById('hintEmpty');
-  if (提示) 提示.style.display = 根块们.length ? 'none' : 'block';
+  刷空提示();
 
   // 块画在哪：开了窗户就画进窗户；
   // 有网但没开窗就**不画** —— 关系网才是默认界面，块是窗户里的内容；
@@ -5147,6 +5164,7 @@ if (有壳()) {
         if (d.说) 网提示(d.说);
       } else {
         网提示(d.说 || '还没有关系数据');
+        刷空提示();
       }
     } else if (d.命令 === '布局存好了') {
       // 静默 —— 拖完每次都存，弹提示会烦
