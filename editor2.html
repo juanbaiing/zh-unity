@@ -257,8 +257,9 @@
     border:1px solid var(--line);z-index:50;pointer-events:none}
   /* 窗户：脚本框张开后露出来的那块独立画布。
      它在关系网里面被裁着 —— 网还在，只是这一格里自己一套缩放平移。 */
-  .窗户{position:relative;margin:8px 0 0;background:var(--槽);
-    border:1px dashed var(--line);border-radius:4px;height:420px;overflow:hidden}
+  /* 窗户是浮出来的：逻辑上属于这个脚本框，但尺寸按屏幕给，会盖到框外面。 */
+  .窗户{position:absolute;left:0;top:100%;margin-top:8px;background:var(--槽);
+    border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:6}
   .内世界{position:absolute;left:0;top:0;transform-origin:0 0;
     transform:translate(var(--内x,0px),var(--内y,0px)) scale(var(--内z,1))}
 
@@ -1118,7 +1119,10 @@ function 开始拖(b, el, 起始) {
   let 在托盘上 = false;
 
   const 移 = ev => {
-    const wx = 世界.getBoundingClientRect();
+    // ⚠️ 基准必须是 块容器()（可能是窗户里的 内世界），不是 #world。
+    //    两者差着几千像素 —— 拿 #world 当基准，屏幕移 100 像素会被换算成
+    //    数据移一万多（实测 10218），块直接飞出天外。
+    const wx = 块容器().getBoundingClientRect();
     b.x = (ev.clientX - wx.left - 抓x) / 总缩放();
     b.y = (ev.clientY - wx.top - 抓y) / 总缩放();
     // 拖的时候保持同一个缩放，视觉上才和原来一样大
@@ -1185,7 +1189,7 @@ function 开始拖(b, el, 起始) {
         if (宿主位) {
           // b.x/b.y 已经是画布坐标，直接换算成相对这个内容区
           const 盒rect = 悬停盒.getBoundingClientRect();
-          const 世界rect = 世界.getBoundingClientRect();
+          const 世界rect = 块容器().getBoundingClientRect();
           b.x = Math.max(4, b.x - (盒rect.left - 世界rect.left) / 总缩放());
           b.y = Math.max(4, b.y - (盒rect.top - 世界rect.top) / 总缩放());
 
@@ -2387,7 +2391,10 @@ function 开窗(实例el, 脚本名) {
       // 只按**宽度**装下，不按高度 —— 一个脚本几十个块，高度装下就得缩到 0.2，
       // 字只剩 5.6px，开出来还是看不清。装得下宽就够，高度你自己滚。
       const z宽 = (w.offsetWidth - 边 * 2) / 右;
-      窗.内视 = { x: 边, y: 边, z: Math.min(1, Math.max(0.25, z宽)) };
+      // ⚠️ 这里千万别加下限。块树能有两千多宽，窗宽只够 290，装上要 0.131；
+      //    托到 0.25 的话可见范围只剩 1288，块直接被推到窗户外面 900 多像素 ——
+      //    看着就是「块乱飞」。字小是内容的事，靠滚轮放大编辑，不能靠不装下。
+      窗.内视 = { x: 边, y: 边, z: Math.min(1, Math.max(0.08, z宽)) };
       应用内视();
     }
   });
@@ -2400,8 +2407,11 @@ function 装窗缩放() {
   if (!框 || 框._绑了) return;
   框._绑了 = true;
   框.addEventListener('wheel', e => {
-    // 窗户里滚 = 缩窗户里的世界。stopPropagation 挡住外层那张网 ——
-    // 不挡的话一滚两层一起动，谁也控制不了。
+    // ⚠️ Shift 交给外层。窗户占了舞台 92%×88%，不留这个口子的话
+    //    开窗后鼠标几乎总在窗户上，外层那张网怎么都缩不了 ——
+    //    看着就是「缩放被卡住」。设计稿里就是这么分工的。
+    if (e.shiftKey) return;
+    // 窗户里滚 = 缩窗户里的世界。stopPropagation 挡住外层那张网。
     e.preventDefault();
     e.stopPropagation();
     const r = 框.getBoundingClientRect();
