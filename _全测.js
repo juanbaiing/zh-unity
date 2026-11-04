@@ -38,6 +38,11 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     return JSON.stringify(出); })()`));
 
   console.log('\n════ 1. 起手状态 ════');
+  // 复位：这一项要验「打开就是网，块不摊在外面」，得先把手动留下的窗关掉。
+  // 不然上一条用例、或者我自己调试时开的窗，会让块留在 DOM 里，
+  // 报到「26 块摊在外面」—— 那不是产品错，是测试没把自己擦干净。
+  await 算(`(function(){ if (窗.el) 关窗(); return 'ok'; })()`);
+  await 等(400);
   const 开 = JSON.parse(await 算(`JSON.stringify({
     块:document.querySelectorAll('.blk').length, 实例框:document.querySelectorAll('.实例框').length,
     线:document.querySelectorAll('#线层 path').length, 网开:网.开, 窗外层:视.z,
@@ -113,11 +118,39 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     开窗(实,'PlayerAttack'); 装窗缩放();
     return 'ok'; })()`);
   await 等(1000);
-  await 算(`(function(){ 窗.内视={x:16,y:16,z:窗.内视.z}; 应用内视(); return 'ok'; })()`);
+  await 算(`(function(){ 窗.内视={x:16,y:16,z:窗.内视.z}; 应用内视();
+    // 重置内视只是为了让「总缩放」可预测，不代表块就落在窗户里了 ——
+    // 实测块心在 (1047,780)，窗户底是 775，差 5px 就掉出去，
+    // 鼠标按下去落到实例框上。所以这里把它拎回可见区中间。
+    const w=窗.el.getBoundingClientRect();
+    const b=窗.内.querySelector(':scope > .blk');
+    if (b) {
+      const r=b.querySelector(':scope > .head').getBoundingClientRect();
+      const cx=r.left+r.width/2, cy=r.top+r.height/2;
+      if (cx<w.left+40||cx>w.right-40||cy<w.top+40||cy>w.bottom-40) {
+        窗.内视.x += (w.left+w.width/2) - cx;   // 内视.x 本身就是屏幕 px 量级
+        窗.内视.y += (w.top+w.height/2) - cy;
+        应用内视();
+      }
+    }
+    return 'ok'; })()`);
   await 等(400);
   const B0 = JSON.parse(await 算(`(function(){
-    const b=窗.内.querySelector(':scope > .blk');
-    const h=b.querySelector(':scope > .head').getBoundingClientRect();
+    // 挑一个「头中心落在窗户可见矩形里」的块来拖。
+    // 以前是直接取第一个块 —— 但内视刚被重置成 {16,16}，第一个块可能被推出
+    // 可见域，鼠标按下去落在实例框上，报「抓点没落到块上，命中 DIV.实例脚」。
+    // 那不等于拖拽坏了，只等于这次没抓到块。挑可见的那个才算真测。
+    // ⚠️ 判据用「中心点」不是「整个头」—— 窗户可见域高 806，块头只要有一半
+    //    露出来就够鼠标按，要求整个头完全在里面会把能拖的块全判成不可见。
+    const w = 窗.el.getBoundingClientRect();
+    let b = null, h = null;
+    for (const x of 窗.内.querySelectorAll(':scope > .blk')) {
+      const r = x.querySelector(':scope > .head').getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      if (cx > w.left + 10 && cx < w.right - 10 &&
+          cy > w.top + 10 && cy < w.bottom - 10) { b = x; h = r; break; }
+    }
+    if (!b) return JSON.stringify({无可见块: true});
     let d=null; const id=b.dataset.id;
     (function 走(l){for(const x of l||[]){ if(String(x.id)===id) d={x:x.x,y:x.y}; 走(x.子); for(const s of x.分支||[]) 走(s.子);} })(根块们);
     // 总缩放 = 内层 × 外层，两个都得算。
@@ -128,7 +161,7 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     return JSON.stringify({id, 头:[h.left+h.width/2, h.top+h.height/2], d,
       总:((窗.内视.z || 1) * (视.z || 1))});
   })()`));
-  const 命B = await 命中(B0.头);
+  const 命B = B0.无可见块 ? { 元素: '（无可见块）', 块: null } : await 命中(B0.头);
   if (命B.块 === B0.id) {
     const 放 = [B0.头[0] + 90, B0.头[1] + 55];
     静('拖', ...屏(B0.头), ...屏(放));
@@ -142,7 +175,9 @@ const 记 = (名, 过, 数 = '') => { 结.push({ 名, 过 }); console.log(`  ${�
     记('内部块拖动换算正确', Math.abs(dx - 望x) < 5 && Math.abs(dy - 望y) < 5,
       `位移 (${dx.toFixed(1)},${dy.toFixed(1)}) 期望 (${望x.toFixed(1)},${望y.toFixed(1)})`);
   } else {
-    记('内部块拖动换算正确', false, `抓点没落到块上，命中 ${命B.元素}`);
+    记('内部块拖动换算正确', false,
+      B0.无可见块 ? '窗户里一个完全可见的块都没有（内视重置把块全推出去了）'
+                  : `抓点没落到块上，命中 ${命B.元素}`);
   }
 
   console.log('\n════ 7. 拖外部实例框，里面的块数据不该变 ══');
