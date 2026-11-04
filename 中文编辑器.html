@@ -272,16 +272,15 @@
   .注释框{position:absolute;border:1px solid #3d5064;border-radius:10px;
     background:color-mix(in srgb, #4a6a8a 7%, transparent);
     pointer-events:none;box-sizing:border-box}
-  /* ⚠️ 框头不能横贯整条。
-     原来它是 left:0;right:0 的一整条 26px —— 框里任何贴着顶部的东西都被它盖住，
-     拖那个小框等于拖整个大框（表现就是「小框拖不动」和「拖小框结果大框跑了」）。
-     现在只有标题文字和 × 能接鼠标，其余穿透下去。 */
+  /* ⚠️ 框头要整条能抓 —— 它只有 26px 高，缩到「只有标题文字能点」就只剩几十像素，
+     实测在 0.42 倍缩放下标题条只有 40×6 个屏幕像素，根本点不中，整个框就拖不动了。
+     框头盖不住下面的实例框：框层 z-index 1、网层 z-index 3，实例框本来就在上面。 */
   .注释框 .框头{position:absolute;left:0;right:0;top:0;height:26px;
     display:flex;align-items:center;gap:8px;padding:0 10px;
-    font-size:12px;color:#8aa2bd;pointer-events:none;
+    font-size:12px;color:#8aa2bd;cursor:move;pointer-events:auto;
     border-bottom:1px solid color-mix(in srgb, #3d5064 60%, transparent)}
   .注释框 .框头 .名额{margin-left:auto;color:#5d7086}
-  .注释框 .框标题{pointer-events:auto;cursor:move;min-width:90px;outline:none;
+  .注释框 .框标题{pointer-events:auto;min-width:60px;outline:none;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .注释框 .框标题[contenteditable="true"]{cursor:text}
   .注释框 .框叉{margin-left:8px;padding:0 4px;color:#5d7086;cursor:pointer;font-size:14px;line-height:1;
