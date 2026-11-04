@@ -4206,11 +4206,36 @@ const 避让边距 = 16;
 
 // 一条点列有没有钻进**第三者的**框里（源框、目标框不算 —— 口就长在它们里面）。
 // 布尔 + 早停：一碰到就返回，不比「算了多少 px」那种贵。
+//
+// ⚠️ 太小的不算，跟 libavoid 那边用同一条线（30px）。
+//    两边判据不一致的后果：这里说「撞了」、那边说「没这块墙」，
+//    等于白跑一次 130ms 的 libavoid，最后画出个跟直连一样的线 —— 只多了一次跳变。
+//
+// ⚠️ 判**线段**，不是判采样点。
+//    点列是 24 段贝塞尔采样出来的，一条 1500px 的线每段 60px —— 30px 高的薄框
+//    正好落在两个采样点之间就漏判了（实测 160×30 的框摆在那儿，线直接穿过去没绕）。
+//    改成线段-矩形精确相交，既不漏也不用加密采样。
 function 撞了第三框(点们, 框位, 自id, 到id) {
-  for (const [x, y] of 点们) {
+  // Liang–Barsky：把线段裁到矩形里，裁完还有残段就是穿过
+  const 段穿框 = (x1, y1, x2, y2, b) => {
+    const 左 = b.x + 2, 右 = b.x + b.w - 2, 上 = b.y + 2, 下 = b.y + b.h - 2;
+    const dx = x2 - x1, dy = y2 - y1;
+    let t0 = 0, t1 = 1;
+    const 裁 = (p, q) => {
+      if (Math.abs(p) < 1e-12) return q >= 0;   // 平行：在里面就留
+      const r = q / p;
+      if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+      else { if (r < t0) return false; if (r < t1) t1 = r; }
+      return true;
+    };
+    return 裁(-dx, x1 - 左) && 裁(dx, 右 - x1) && 裁(-dy, y1 - 上) && 裁(dy, 下 - y1) && t0 <= t1;
+  };
+  for (let i = 1; i < 点们.length; i++) {
+    const [x1, y1] = 点们[i - 1], [x2, y2] = 点们[i];
     for (const [id, b] of 框位) {
       if (id === 自id || id === 到id) continue;
-      if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) return true;
+      if (Math.min(b.w, b.h) < 30) continue;
+      if (段穿框(x1, y1, x2, y2, b)) return true;
     }
   }
   return false;
@@ -4492,9 +4517,15 @@ function 画线() {
   if (可算) {
     // 障碍 = 别的框。源框和目标框不算 —— 口就长在它们里面，不让穿等于自断起终点。
     const 站边 = new Set(边们.flatMap(e => [e.自, e.到]));
+    // 太小的不算障碍。
+    // Unity 组件口是钉在框右肩上的 16px 高小标签（「Rigidbody」「Transform」…），
+    // 26 个框里 18 个是它。把它们当墙，线就会为了躲一块 16px 的标签绕出 70px 的弯 ——
+    // 而人眼根本看不出「这里挡了一下」，只看到松手瞬间线跳了一下。
+    // 真实例框最矮 104px，跟 16px 差了一整档，这条线画在 30 上够安全。
+    const 是墙 = (id, b) => !站边.has(id) && Math.min(b.w, b.h) >= 30;
     try {
       路由 = window.libavoided.routeEdges({
-        obstacles: [...框位].filter(([id]) => !站边.has(id))
+        obstacles: [...框位].filter(([id, b]) => 是墙(id, b))
           .map(([id, b]) => ({ id, x: b.x, y: b.y, width: b.w, height: b.h })),
         edges: 边们.map(e => ({ id: e.id, sourcePoint: e.源点, targetPoint: e.终点 })),
       }, {
