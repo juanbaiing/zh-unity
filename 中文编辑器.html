@@ -4886,15 +4886,19 @@ function 建实例框(实) {
   // 放大到占满屏幕时，里面那块画布就是一块正常的横的编辑区，不是方的。
   requestAnimationFrame(() => { if (el.isConnected) 窗口改了就重排(); });
 
-  // 拖标题条移动整个框。用 pointer 事件，坐标除以视.z —— 和块用的是同一套换算。
-  头.addEventListener('pointerdown', e => {
+  // 拖整个框 —— 不光是标题条。
+  //
+  // ⚠️ 原来只绑在 .实例头 上：点标题条能拖，点身体（脚本行那块）事件冒泡到舞台，
+  //    整张画布就平移了。使用者看到的是「大框内部拖不动，一拖整个画布跑」。
+  //    现在整块都能抓；脚本行的 click 照常开窗，因为「点」不产生移动、不改位置。
+  el.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    // ⚠️ 点按钮不参与拖动。头的 pointerdown 会 preventDefault，
+    // ⚠️ 点按钮不参与拖动。pointerdown 会 preventDefault，
     //    把后面那次 click 掐掉 —— 于是「← 返回」「✎ 编辑」看着点不动。
     if (e.target.closest('.编钮')) return;
     e.preventDefault();
     e.stopPropagation();
-    头.setPointerCapture(e.pointerId);
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
     const 起 = { x: e.clientX, y: e.clientY, ox: 位.x, oy: 位.y };
     const 移 = ev => {
       位.x = Math.round(起.ox + (ev.clientX - 起.x) / (视.z || 1));
@@ -4904,12 +4908,12 @@ function 建实例框(实) {
       画线();
     };
     const 停 = () => {
-      头.removeEventListener('pointermove', 移);
-      头.removeEventListener('pointerup', 停);
+      el.removeEventListener('pointermove', 移);
+      el.removeEventListener('pointerup', 停);
       存布局();
     };
-    头.addEventListener('pointermove', 移);
-    头.addEventListener('pointerup', 停);
+    el.addEventListener('pointermove', 移);
+    el.addEventListener('pointerup', 停);
   });
 
   // 悬停 = 只看这一束
