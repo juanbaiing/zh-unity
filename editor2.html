@@ -79,6 +79,9 @@
   button{background:var(--钮);color:var(--text);border:1px solid var(--line);border-radius:8px;
     padding:4px 12px;font-size:var(--字正文);cursor:pointer;font-family:inherit}
   button:hover{background:var(--line)}
+  /* 开关处于「关」的状态：跟旁边那些按一下就没了的按钮区分开，
+     一眼能看出「这个现在是关着的」，而不是「这个按钮我按过」。 */
+  button.熄{color:var(--dim);border-style:dashed;background:transparent}
 
   /* 顶栏的标签页：一个标签 = 一张画布 = 一个 Unity 脚本 */
   .tabs{display:flex;flex:none;background:var(--槽);border-bottom:1px solid var(--line);
@@ -364,15 +367,40 @@
   .空头框.误报 .实例名{color:var(--字3)!important;font-weight:400}
   .空头框.误报 .实例签{color:var(--字4)!important;background:transparent}
   .空头框.误报 .实例脚{color:var(--字4)!important}
-  /* 连到 Unity 内置组件：不是错，是中性的。用蓝灰，不跟红色抢注意力。 */
+  /* 连到 Unity 内置组件：不是错，是中性的。用蓝灰，不跟红色抢注意力。
+     ⚠️ 2026-11-04 改小了。原来是 220×80 的大框，跟真断链一样的体积，
+        18 个就铺满画布 —— 使用者原话「到处飞」。
+        它只是「这个口连到引擎组件」的记号，不是一块地方：
+        **一个小圆虚线框 + 一个短标签**，贴在源框右肩上。
+        还能整体关掉（顶栏「组件口」）。
+     ⚠️ 尺寸别抠太小：这里被 #world 的 scale(视.z) 再缩一道，
+        z=0.5 时 13px 的圆只剩 7 个物理像素，看着就像个脏点。
+        圆 16 / 字 12 是缩到 0.5 还能认出是「一个圆圈」的下限。 */
   .空头框.组件头{
-    border:1px dashed #5a6f8a!important;
-    border-left:3px solid #5a6f8a!important;
-    background:color-mix(in srgb, #5a6f8a 12%, var(--panel))!important;
+    border:0!important;background:transparent!important;
+    display:flex!important;align-items:center;gap:6px;
+    width:auto!important;height:auto!important;
+    min-width:0!important;padding:0!important;
+    cursor:default;user-select:none;
+    /* 贴在框外面，别跟框里的脚本行抢地方 */
+    transform:translateX(2px);
   }
-  .空头框.组件头 .实例名{color:#9db3cc!important;font-weight:500}
-  .空头框.组件头 .实例签{color:#8aa2bd!important;background:transparent}
-  .空头框.组件头 .实例脚{color:#7d8fa3!important}
+  .空头框.组件头 .组件圆{
+    flex:0 0 auto;width:16px;height:16px;border-radius:50%;
+    border:1.5px dashed #7f97b4;background:color-mix(in srgb, #5a6f8a 14%, transparent);
+    box-sizing:border-box;
+  }
+  .空头框.组件头 .组件标{
+    color:#93aac4;font-size:12px;line-height:1;font-weight:400;
+    padding:2px 5px;border-radius:3px;
+    /* 底要实：这个标记常常压在连线上，半透明底会和线糊出一层重影 */
+    background:#232d3a;
+    white-space:nowrap;
+  }
+  .空头框.组件头:hover .组件圆{border-color:#b9cde3;background:color-mix(in srgb, #5a6f8a 30%, transparent)}
+  .空头框.组件头:hover .组件标{color:#dce9f6;background:#31404f}
+  /* 关掉整层组件口 —— 顶栏那个开关控制的 */
+  #网层.藏组件口 .空头框.组件头{display:none!important}
   /* 悬停一个框：只留跟它有关的那几根线，其余压到接近底色。
      线一多，任何走线算法都救不了 —— 一次只看一束才行。
      这个比你之前提的「整体保留但半透明」更激进一点：只点亮一束，其余几乎消失。 */
@@ -515,6 +543,7 @@
   <button id="saveUnityBtn" title="直接写进 Unity 项目的 Assets 目录（整份覆盖）">存到 Unity</button>
   <button id="scanBtn" title="扫一遍 Unity 项目：有哪些脚本、场景、预制体，谁挂在哪个物体上">扫描项目</button>
   <button id="copyBtn">复制 C#</button>
+  <button id="组件口钮" title="现在显示「连到 Unity 组件」的小圆标记，点一下收起">组件口</button>
   <button id="clearBtn">清空</button>
 </header>
 
@@ -2196,6 +2225,13 @@ document.getElementById('copyBtn').onclick = async () => {
 };
 document.getElementById('clearBtn').onclick = () => { 根块们 = []; 重画(); };  // 只管当前这张画布
 
+// 组件口开关：把「连到 Unity 组件」的小圆收起来 / 放出来。
+// 关掉的只是它自己 —— 真断链（红虚线那种）不动，那是必须看见的东西。
+document.getElementById('组件口钮').onclick = () => {
+  切组件口();
+  画线();
+};
+
 // ---------------- 存到 Unity ----------------
 // 整份覆盖写，不是追加 —— 同一张画布改十次，文件里永远只有这一份。
 // 只有 exe 里才有写盘通道；网页版退回成「下载文件」。
@@ -2846,6 +2882,7 @@ function 画网(图, 原地) {
   const 旧视 = { x: 视.x, y: 视.y, z: 视.z };
   建网层();
   网.开 = true;
+  应用组件口开关();          // 把开关状态贴回新的网层上
   // 页面刚打开时 网.开 还是 false，重画() 按「没有网」的样子把块摊在 #world 上。
   // 网一到它们就该收进去 —— 不收的话打开是 26 个块铺满画布压在网上面，
   // 看着像「网没出来」，其实是被自己的块盖住了。
@@ -3006,9 +3043,40 @@ function 建孤岛框(孤) {
 //
 // 误报是必然的：运行时才赋值的引用，扫描器看不出来。
 // 所以右键能申诉 —— 三种处理都写库，重扫不丢。
+//
+// ⚠️ 连到 Unity 内置组件的那种（种类='组件'）跟真正的断链是两回事：
+//    Rigidbody / Slider / Text 本来就该是组件，不是谁忘了接线。
+//    原来给它整了个 220×80 的大框，跟断链一样的体积，18 个就铺满画布 ——
+//    使用者原话「到处飞」。现在改成**一个小圆虚线框 + 一个短标签**，
+//    位置也不再按全局序号往下堆，而是钉在源框右肩上（紧凑竖排）。
+//    还能整体关掉（顶栏「组件口」）。
+// 组件口摆哪：钉在源框的**右肩**，同一个源框上的几个按顺序竖排。
+//
+// 原来它跟真断链共用一套「源位下面 +300、往下每 110 一个」的摆法，
+// 但序号是**全局**的 —— 第 18 个组件口就摆到源框下面 2000px 开外去了。
+// 使用者原话「到处飞」。它本来就是那条出口的注脚，贴着源框才对。
+function 组件口位(空) {
+  const 源位 = 空.自 ? 网.位置.get(空.自) : null;
+  if (!源位) return { x: 空.x || 0, y: 空.y || 0 };
+  // 同一个源框上，这是第几个组件口
+  const 同源 = (网.空头们 || []).filter(k => k.种类 === '组件' && k.自 === 空.自);
+  const 序 = Math.max(0, 同源.findIndex(k => k.id === 空.id));
+  // 源框宽度从 DOM 量（实例框宽度不固定，脚本多的更宽）
+  let 宽 = 220;
+  if (网.层) {
+    const src = 网.层.querySelector('.实例框[data-id="' + CSS.escape(空.自) + '"]');
+    if (src) 宽 = src.offsetWidth || 220;
+  }
+  // 贴在右肩外沿：往右探出一点点，免得压住框里的脚本行。
+  // 竖向间距按 22px 排 —— 比标记本身高一点，缩到 0.5 倍也不会糊成一条。
+  return { x: 源位.x + 宽 + 4, y: 源位.y + 4 + 序 * 22 };
+}
+
 function 建空头框(空) {
   let 位 = 网.位置.get(空.id);
-  if (!位) {
+  // 组件口不存位置 —— 它钉在源框右肩上。
+  if (空.种类 === '组件') 位 = 组件口位(空);
+  else if (!位) {
     // 第一次摆：这个口要是长在场上某个实例身上，就摆在它正下方。
     //
     // ⚠️ 不能摆右边。第一版是 源位.x + 470 —— [对准 enemy] 会把源框贴到左上角
@@ -3033,6 +3101,30 @@ function 建空头框(空) {
   el.style.width = '220px';
   el.style.height = '80px';
 
+  // ── 组件口：一个小圆 + 一个短标签，不要那个大框 ──
+  // 它本来就是「这个口连到引擎组件」的记号，不是一块地方。
+  if (空.种类 === '组件') {
+    el.style.width = '';            // 交给 CSS 按内容撑
+    el.style.height = '';
+    const 圆 = document.createElement('span');
+    圆.className = '组件圆';
+    const 标 = document.createElement('span');
+    标.className = '组件标';
+    标.textContent = 空.字段 || 空.名 || '组件';
+    el.appendChild(圆);
+    el.appendChild(标);
+    el.title = (空.脚本名 || '') + ' 第 ' + ((空.口 || 0) + 1) + ' 个口 → Unity 组件 ' + (空.字段 || '');
+
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault(); e.stopPropagation();
+      开申诉菜单(空, e);
+    });
+    el.addEventListener('mouseenter', () => 点亮(空.自));
+    el.addEventListener('mouseleave', 熄灭);
+    网.层.appendChild(el);
+    return;
+  }
+
   const 头 = document.createElement('div');
   头.className = '实例头';
   const 名 = document.createElement('span');
@@ -3040,7 +3132,7 @@ function 建空头框(空) {
   名.textContent = 空.名 || 空.字段 || 空.id;
   const 签 = document.createElement('span');
   签.className = '实例签';
-  签.textContent = 空.申诉 === '正常' ? '已申诉' : (空.种类 === '组件' ? 'Unity 组件' : '缺接应');
+  签.textContent = 空.申诉 === '正常' ? '已申诉' : '缺接应';
   头.appendChild(名); 头.appendChild(签);
   el.appendChild(头);
 
@@ -3049,11 +3141,7 @@ function 建空头框(空) {
   const 说 = document.createElement('div');
   说.className = '实例脚';
   说.style.borderTop = '0';
-  说.textContent = 空.申诉 === '正常'
-    ? '你申诉过 · 这里没问题'
-    : 空.种类 === '组件'
-      ? '连到 Unity 内置组件，不是断'
-      : '没人来接 · 右键处理';
+  说.textContent = 空.申诉 === '正常' ? '你申诉过 · 这里没问题' : '没人来接 · 右键处理';
   体.appendChild(说);
   el.appendChild(体);
 
@@ -3092,7 +3180,34 @@ function 建空头框(空) {
   网.层.appendChild(el);
 }
 
-// ── 申诉菜单 ──────────────────────────────────────────────
+// ── 组件口：显示 / 不显示 ─────────────────────────────
+//
+// 「脚本里第 k 个口连到 Rigidbody/Slider/Text」是**事实**，不是错误。
+// 但它一次能出十几个，摊在画布上会盖住真正要看的东西（真断链是红的那些）。
+// 所以给它一个开关，默认开，想清台就关。
+//
+// 不放进 设置 落库：这是「这一刻想不想看」，跟「这东西是什么」不是一类。
+// 每次打开都从「显示」开始 —— 藏起来的东西不该在你不知道的情况下继续藏着。
+let 组件口开着 = true;
+function 显示组件口() { return 组件口开着; }
+
+function 应用组件口开关() {
+  if (网.层) 网.层.classList.toggle('藏组件口', !组件口开着);
+  const 钮 = document.getElementById('组件口钮');
+  if (钮) {
+    钮.textContent = 组件口开着 ? '组件口' : '组件口·关';
+    钮.classList.toggle('熄', !组件口开着);
+    钮.title = 组件口开着
+      ? '现在显示「连到 Unity 组件」的小圆标记，点一下收起'
+      : '已收起「连到 Unity 组件」的小标记，点一下显示';
+  }
+}
+
+function 切组件口() {
+  组件口开着 = !组件口开着;
+  应用组件口开关();
+}
+
 // 三个选项都是「你说的话」，不是猜的，所以全部落库：
 //   指定连接对象 → 它其实指向谁（连上就不算断了）
 //   正常显示     → 误报，别再喊，但框留着（藏了就成了「悄悄消失」）
@@ -3793,6 +3908,9 @@ function 画线() {
   //    而且看不出是哪个脚本伸的手。起点跟着那一行的第 k 个圆点走。
   for (const 空 of 网.空头们 || []) {
     if (空.申诉 === '正常') continue;   // 你说是误报的，就别再画这根刺
+    // 组件口收起了，那根虚线也一起收 —— 只留线不留头、或只留头不留线，
+    // 都会让人以为「这里有东西但没连上」。
+    if (空.种类 === '组件' && !显示组件口()) continue;
     const 源 = 框位.get(空.自);
     const 的 = 框位.get(空.id);
     if (!源 || !的) continue;
