@@ -282,6 +282,7 @@ namespace 图数据
                 var 已挂 = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var e in 边们.Where(e => e.种类 == "实例化")) 已挂.Add(e.到);
                 var 序 = 0;
+                var 孤岛列 = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Max(1, 节点列表.Count(n => n.类型 == "脚本")))));
                 foreach (var n in 节点列表.Where(n => n.类型 == "脚本").OrderBy(n => n.id, StringComparer.Ordinal))
                 {
                     if (已挂.Contains(n.id)) continue;
@@ -293,8 +294,11 @@ namespace 图数据
                         id = n.id,
                         名 = 短,
                         原因 = "场景里没有物体挂这个脚本",
-                        x = 90 + (按物.Count % 列数) * 格宽 + 格宽,
-                        y = 130 + 逐行高.Sum() + 格缝 + 序 * 180,
+                        // 网格排，不是一个接一个往下堆。
+                        // 73 个脚本竖着排会拉成 13000 像素的一条线（实测），
+                        // 屏幕上只看得见 9 个 —— 那等于没有图。
+                        x = 90 + (序 % 孤岛列) * 格宽,
+                        y = 130 + 逐行高.Sum() + 格缝 + (序 / 孤岛列) * 200,
                     });
                     序++;
                 }
