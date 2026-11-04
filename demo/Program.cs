@@ -8,7 +8,3 @@ foreach (var x in list) {
         Console.WriteLine(0);
     }
 }
-
-for (int i = 0; i < 3; i++) {
-    Console.WriteLine("喘口气");
-}

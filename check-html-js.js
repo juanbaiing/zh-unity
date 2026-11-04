@@ -2,7 +2,7 @@
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
-const 文件 = process.argv[2] || 'block-editor.html';
+const 文件 = process.argv[2] || 'editor2.html';
 const html = fs.readFileSync(文件, 'utf8');
 
 // 取所有内联脚本（没有 src 属性的）
