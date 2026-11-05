@@ -167,6 +167,11 @@
     background:radial-gradient(circle,var(--panel) 1px,transparent 1px) 0 0/22px 22px}
   #hintEmpty{position:absolute;left:40px;top:40px;color:var(--dim);font-size:var(--字正文)}
   #hintEmpty.警示{color:#a06060}
+  /* 空画布上那句「先随便试试」。做成可点的、灰的、不抢眼 ——
+     想自己拖的人不会注意它，不知道从哪下手的人能看见它。 */
+  #hintEmpty .试一下{margin-left:16px;color:var(--cn);cursor:pointer;
+    border-bottom:1px dashed currentColor;user-select:none}
+  #hintEmpty .试一下:hover{color:var(--字1)}
   #比例牌{position:absolute;right:10px;bottom:8px;font-size:var(--字正文);color:var(--dim);
     pointer-events:none;user-select:none;z-index:5}
   #去原点{position:absolute;right:10px;bottom:26px;font-size:var(--字正文);color:var(--dim);
@@ -4627,11 +4632,42 @@ function 刷空提示() {
     return;
   }
   提示.style.display = 'block';
+  提示.textContent = '';
+
   const 没扫过 = !网.开 && !window.项目数据;
-  提示.textContent = 没扫过
+  const 句 = document.createElement('span');
+  句.textContent = 没扫过
     ? '还没扫描项目 —— 点顶上的「扫描项目」，指到你的 Unity 工程里的 Assets 目录'
     : '从左边点一个块开始';
+  提示.appendChild(句);
   提示.classList.toggle('警示', 没扫过);
+
+  // 「先随便试试」：不点也能自己拖，点了就给你一个能跑的样板。
+  // 空画布上只说「从左边点一个块开始」，对没写过的人等于没说 ——
+  // 他缺的不是操作，是「成品长什么样」的参照。
+  const 试 = document.createElement('span');
+  试.className = '试一下';
+  试.textContent = '先随便试试 →';
+  试.title = '生成一个能跑的样板：类 + 方法 + 打印。不喜欢就直接删掉';
+  试.addEventListener('click', 建个样板);
+  提示.appendChild(试);
+}
+
+// 一个最小可跑的样板。故意写得很短：他改起来没负担。
+function 建个样板() {
+  const 类 = 树.新('类', { 名: 'MyScript', 继承: 'MonoBehaviour' });
+  const 方 = 树.新('方法', { 名: '开始时', 返回什么: '无返回' });
+  const 打 = 树.新('打印', { 值: '"你好"' });
+  方.子.push(打);
+  类.子.push(方);
+  // 树.新 给的坐标都是 (0,0)，三个块会叠成一坨（实测只看得见最上面那行的
+  // 半截）。给顶层一个靠里的起点，子块由重画的整理逻辑摆。
+  类.x = 120; 类.y = 120;
+  根块们 = [类];
+  历史 = []; 历史位 = -1;
+  重画();
+  输出();
+  存盘();
 }
 
 function 重画(跳过重叠整理) {
@@ -5141,6 +5177,20 @@ document.getElementById('unityDir').onclick = () => {
 
 if (有壳()) window.chrome.webview.postMessage({ 命令: '问目录' });
 
+// 右上角一句话提示：不挡操作、不打断、几秒后自己走。
+// 出错和「存好了」共用它 —— 别用 alert，那会把整个界面卡住。
+function 说一句(话, 坏) {
+  const 条 = document.createElement('div');
+  条.textContent = (坏 ? '✗ ' : '') + 话;
+  条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
+    'background:' + (坏 ? 'var(--错底)' : 'var(--钮)') + ';' +
+    'color:' + (坏 ? '#c08080' : 'var(--text)') + ';' +
+    'border:1px solid ' + (坏 ? 'var(--错线)' : 'var(--line)') + ';border-radius:8px;' +
+    'padding:8px 12px;font-size:var(--字正文);max-width:420px';
+  document.body.appendChild(条);
+  setTimeout(() => 条.remove(), 坏 ? 5000 : 8000);
+}
+
 if (有壳()) {
   window.chrome.webview.addEventListener('message', e => {
     const d = e.data;
@@ -5153,6 +5203,13 @@ if (有壳()) {
         存盘();
       }
       刷新本份标签();
+      // 第一次存成功必须说一句「还得挂到物体上」——
+      // 不说的话他会切回 Unity 发现场景里什么都没有，以为工具坏了。
+      // 只说一次，之后不再烦他。
+      if (!localStorage.getItem('zh-editor-说过要挂')) {
+        localStorage.setItem('zh-editor-说过要挂', '1');
+        说一句('写进 ' + (d.相对 || d.文件名) + ' 了。切回 Unity，把这个脚本拖到物体上才会跑。');
+      }
       const 旧 = 按钮.textContent;
       按钮.textContent = '已存 ' + d.文件名;
       按钮.title = d.路径 + (d.说明 ? '（' + d.说明 + '）' : '');
@@ -5210,13 +5267,7 @@ if (有壳()) {
       if (扫钮 && 扫钮.textContent !== '扫描项目') 扫钮.textContent = '扫描项目';
       const 刷钮 = document.getElementById('刷新钮');
       if (刷钮 && 刷钮.textContent !== '刷新') 刷钮.textContent = '刷新';
-      const 条 = document.createElement('div');
-      条.textContent = '✗ ' + d.说;
-      条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
-        'background:var(--错底);color:#c08080;border:1px solid var(--错线);border-radius:8px;' +
-        'padding:8px 12px;font-size:var(--字正文);max-width:360px';
-      document.body.appendChild(条);
-      setTimeout(() => 条.remove(), 5000);
+      说一句(d.说 || '出错了', true);
     }
   });
 }
