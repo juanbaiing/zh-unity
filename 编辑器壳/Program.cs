@@ -389,14 +389,18 @@ namespace ZhEditorShell
                     组件们[物id].Add(new { 脚本 = 匹配, 字段 = 值们, 备注 });
                 }
 
-                foreach (var kv in 组件们)
+                // 遍历**所有物体**，不是只遍历「挂了脚本的物体」。
+                // Unity 新建场景就是 Main Camera + Directional Light + Cube，一个脚本都没挂 ——
+                // 只输出挂了脚本的话，新项目打开是一片空白，看着像工具坏了。
+                // 没挂脚本的物体照样给一个框（组件为空），一眼就知道那是「还没挂东西」。
+                foreach (var kv in 物体名)
                 {
                     结果.Add(new
                     {
                         文件 = 相对,
-                        物体 = 物体名.TryGetValue(kv.Key, out var nm) ? nm : "（无名字）",
+                        物体 = kv.Value,
                         tag = 物体Tag.TryGetValue(kv.Key, out var tg) ? tg : "",
-                        组件 = kv.Value,
+                        组件 = 组件们.TryGetValue(kv.Key, out var cs) ? cs : new List<object>(),
                     });
                 }
             }
