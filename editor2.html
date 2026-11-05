@@ -630,6 +630,7 @@
   <span id="unityDir" class="dirchip" title="设置不了">Unity 目录：未设</span>
   <button id="saveUnityBtn" title="直接写进 Unity 项目的 Assets 目录（整份覆盖）">存到 Unity</button>
   <button id="scanBtn" title="扫一遍 Unity 项目：有哪些脚本、场景、预制体，谁挂在哪个物体上">扫描项目</button>
+  <button id="刷新钮" title="重新扫一遍 Unity 项目（在 Unity 里加了物体、改了挂载之后点这个）">刷新</button>
   <button id="copyBtn">复制 C#</button>
   <button id="组件口钮" title="现在显示「连到 Unity 组件」的小圆标记，点一下收起">组件口</button>
   <button id="clearBtn">清空</button>
@@ -2588,6 +2589,15 @@ document.getElementById('scanBtn').onclick = () => {
   window.chrome.webview.postMessage({ 命令: '扫描项目' });
 };
 
+// 刷新 = 重新扫一遍。跟「扫描项目」做的是同一件事，只是名字更直白 ——
+// 在 Unity 里加了个物体、改了挂哪个脚本，点这个就能看见。
+document.getElementById('刷新钮').onclick = () => {
+  if (!有壳()) { alert('要在 exe 里才能刷新'); return; }
+  const b = document.getElementById('刷新钮');
+  b.textContent = '刷新中…';
+  window.chrome.webview.postMessage({ 命令: '扫描项目' });
+};
+
 // Unity 目录显示在这 —— 不点「存到 Unity」也能看到现在存去哪儿，点一下能换
 function 刷新目录标签(路) {
   const el = document.getElementById('unityDir');
@@ -2660,11 +2670,17 @@ if (有壳()) {
       刷新引擎标签(d.路径);
     } else if (d.命令 === '项目扫描') {
       window.项目数据 = d;
-      const b = document.getElementById('scanBtn');
-      if (b) b.textContent = '扫描项目';
+      const 扫 = document.getElementById('scanBtn');
+      if (扫) 扫.textContent = '扫描项目';
+      const 刷 = document.getElementById('刷新钮');
+      if (刷) 刷.textContent = '刷新';
       console.log('[扫描] 脚本', d.脚本.length, '场景', d.场景.length,
         '预制', d.预制.length, '实例', d.实例们.length);
       console.log('[扫描] 实例明细', d.实例们);
+      // 扫完立刻重拉一次网。
+      // ⚠️ 不拉就是「在 Unity 里加了个物体，编辑器里什么都不变」——
+      //    扫描只更新了 项目数据，关系网是另一条消息（关系图数据）来的。
+      拉关系图();
     } else if (d.命令 === '目录') {
       刷新目录标签(d.路径 || '');
     } else if (d.命令 === '关系图数据') {
@@ -2691,6 +2707,8 @@ if (有壳()) {
       // 出错路径不恢复的话，按钮就永远停在「扫描中…」，看着像卡死了。
       const 扫钮 = document.getElementById('scanBtn');
       if (扫钮 && 扫钮.textContent !== '扫描项目') 扫钮.textContent = '扫描项目';
+      const 刷钮 = document.getElementById('刷新钮');
+      if (刷钮 && 刷钮.textContent !== '刷新') 刷钮.textContent = '刷新';
       const 条 = document.createElement('div');
       条.textContent = '✗ ' + d.说;
       条.style.cssText = 'position:fixed;right:14px;top:56px;z-index:99999;' +
