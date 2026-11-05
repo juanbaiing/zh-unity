@@ -45,14 +45,87 @@ namespace ZhEditorShell
             catch { /* 记不住就算了，下次再问一遍 */ }
         }
 
-        private static string? 问目录()
+        // 新手不知道 Assets 在哪，也记不住项目放在哪个盘。
+        // Unity/团结引擎启动时会把项目路径写进 Editor.log 的头几行 —— 直接读它。
+        // 优先于让用户自己找：找到了就把选择框预填到那个目录，他一眼看到自己的项目名。
+        private static string? 找最近项目(out string 说明)
+        {
+            说明 = "没找到 Editor.log";
+            var 本地 = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var 日志们 = new[]
+            {
+                Path.Combine(本地, "Tuanjie", "Editor", "Editor.log"),
+                Path.Combine(本地, "Tuanjie", "Editor", "Editor-prev.log"),
+                Path.Combine(本地, "Unity", "Editor", "Editor.log"),
+                Path.Combine(本地, "Unity", "Editor", "Editor-prev.log"),
+            };
+            foreach (var 日志 in 日志们)
+            {
+                if (!File.Exists(日志)) continue;
+                try
+                {
+                    // ⚠️ Unity 开着的时候这个日志被它占着，File.ReadLines 会直接抛异常。
+                    //    必须自己开 FileStream 声明共享读写 —— 不然下面的 catch 会把
+                    //    「打不开」静默当成「没找到」，用户就以为自动识别不好使。
+                    using var 流 = new FileStream(日志, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var 读 = new StreamReader(流, System.Text.Encoding.UTF8);
+                    for (var i = 0; i < 300 && !读.EndOfStream; i++)
+                    {
+                        var 候选 = (读.ReadLine() ?? "").Trim();
+                        if (候选.Length < 4 || 候选.Length > 240) continue;
+                        if (候选[0] < 'A' || 候选[0] > 'Z') continue;
+                        if (候选[1] != ':') continue;
+                        if (候选.IndexOfAny(new[] { '*', '?', '<', '>', '|', '"' }) >= 0) continue;
+                        // 项目根的特征：它下面有 Assets
+                        var 资源 = Path.Combine(候选, "Assets");
+                        if (!Directory.Exists(资源)) continue;
+                        // ⚠️ 光有 Assets 不够。Unity 里新建的空项目也有 Assets，但里面只有场景、
+                        //    一个脚本都没有 —— 认它等于把人引到空项目上，扫完一片空白，
+                        //    他会以为工具坏了。必须有 .cs 才算「他在写的那个项目」。
+                        var 有脚本 = false;
+                        try
+                        {
+                            if (Directory.GetFiles(资源, "*.cs", SearchOption.TopDirectoryOnly).Length > 0) 有脚本 = true;
+                            else
+                                foreach (var 子 in Directory.GetDirectories(资源))
+                                {
+                                    if (Directory.GetFiles(子, "*.cs", SearchOption.TopDirectoryOnly).Length > 0) { 有脚本 = true; break; }
+                                }
+                        }
+                        catch { }
+                        if (!有脚本) continue;
+                        说明 = "从 " + Path.GetFileName(日志) + " 认出：" + 候选;
+                        return 候选;
+                    }
+                    说明 = "读了 " + Path.GetFileName(日志) + " 前 300 行，没有像项目路径的";
+                }
+                catch (Exception e) { 说明 = "读 " + Path.GetFileName(日志) + " 失败：" + e.Message; }
+            }
+            return null;
+        }
+
+        // 用户可能选的是项目根（My project），也可能是里面的 Assets —— 两种都认。
+        // 新手记的是项目名，不是 Assets，所以别再逼他往里点一层。
+        private static string? 规整成Assets(string 选的)
+        {
+            var 根 = 选的.TrimEnd('\\', '/');
+            var 内层 = Path.Combine(根, "Assets");
+            if (Directory.Exists(内层)) return 内层;
+            if (Directory.Exists(根)) return 根;
+            return null;
+        }
+
+        private static string? 问目录(string? 预填 = null)
         {
             using var 框 = new FolderBrowserDialog
             {
-                Description = "选 Unity 项目的 Assets 文件夹（脚本会直接写进去）",
-                 UseDescriptionForTitle = true,
+                Description = "选 Unity 项目文件夹（就是里面有 Assets 和 ProjectSettings 的那个）",
+                UseDescriptionForTitle = true,
                 ShowNewFolderButton = false,
             };
+            // 自动找到的项目先摆进去，用户点头就行，不用自己翻盘
+            if (!string.IsNullOrEmpty(预填) && Directory.Exists(预填)) 框.SelectedPath = 预填;
             return 框.ShowDialog() == DialogResult.OK ? 框.SelectedPath : null;
         }
 
@@ -717,17 +790,22 @@ namespace ZhEditorShell
                                         // 第一次用的人，第一步就是点「扫描项目」——这时候还没设过目录。
                                         // 光回一句「还没选 Assets 目录」等于让他自己去找那个能点的小标签，
                                         // 所以直接弹选择框：点扫描 = 选项目，一步到位。
-                                        记("还没设目录，直接弹选择框");
-                                        var 选 = 问目录();
-                                        if (选 == null || !Directory.Exists(选))
+                                        //
+                                        // 弹之前先试着从 Unity 的 Editor.log 把项目找出来，
+                                        // 找到了就把框预填到那儿 —— 他一眼看见自己的项目名，点确定就行。
+                                        var 猜 = 找最近项目(out var 猜说明);
+                                        记(猜说明);
+                                        var 选 = 问目录(猜);
+                                        var 规整 = 选 == null ? null : 规整成Assets(选);
+                                        if (规整 == null)
                                         {
-                                            回话(网页, new { 命令 = "出错", 说 = "没选目录，取消了。再点一次「扫描项目」就行" });
+                                            回话(网页, new { 命令 = "出错", 说 = "这个文件夹里没有 Assets，选 Unity 项目那一层。再点一次「扫描项目」" });
                                             return;
                                         }
-                                        存目录(选);
-                                        回话(网页, new { 命令 = "目录", 路径 = 选 });
-                                        资源 = 选;
-                                        记("选好了：" + 选);
+                                        存目录(规整);
+                                        回话(网页, new { 命令 = "目录", 路径 = 规整 });
+                                        资源 = 规整;
+                                        记("选好了：" + 规整);
                                     }
                                     // 选的是 Assets，项目根是它的上一级（那里有 ProjectSettings）
                                     var 项目根 = Directory.GetParent(资源.TrimEnd('\\', '/'))?.FullName ?? 资源;
@@ -746,6 +824,13 @@ namespace ZhEditorShell
                                     记($"预制 {预制.Count}");
 
                                     记($"扫完：脚本{脚本.Count} 场景{场景.Count} 预制{预制.Count}");
+                                    // 一个脚本都没有 = 多半选错项目了（Unity 新建的空项目也长这样）。
+                                    // 直说，别让人对着空白画布猜是工具坏了还是没扫到。
+                                    if (脚本.Count == 0)
+                                    {
+                                        回话(网页, new { 命令 = "出错", 说 = $"这个项目里一个 .cs 脚本都没有（{资源}）—— 是不是选错项目了？再点一次「扫描项目」换一个" });
+                                        return;
+                                    }
                                     var 实例们 = 解析实例(项目根, 资源, 场景, 预制);
                                     记($"解析出实例 {实例们.Count} 个，准备回话");
                                     回话(网页, new { 命令 = "项目扫描", 项目根, 资源目录 = 资源,
