@@ -4617,7 +4617,14 @@ let 画序 = 0;
 function 刷空提示() {
   const 提示 = document.getElementById('hintEmpty');
   if (!提示) return;
-  if (根块们.length) { 提示.style.display = 'none'; return; }
+  if (根块们.length) {
+    提示.style.display = 'none';
+    // 藏起来时把话清掉 —— 不清的话下次显示出来还是上一轮那句，
+    // 「还没扫描项目」会挂在已经扫过的画布上，看着像没扫成功
+    提示.textContent = '';
+    提示.classList.remove('警示');
+    return;
+  }
   提示.style.display = 'block';
   const 没扫过 = !网.开 && !window.项目数据;
   提示.textContent = 没扫过

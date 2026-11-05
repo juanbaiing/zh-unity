@@ -116,6 +116,20 @@ namespace ZhEditorShell
             return null;
         }
 
+        // 只看设置里记着的那条路径，不管它现在还在不在。
+        // 用来给选择框定个起点 —— 目录被删了也照样能用它的上一层。
+        private static string? 读旧目录()
+        {
+            try
+            {
+                if (!File.Exists(设置文件)) return null;
+                using var 档 = JsonDocument.Parse(File.ReadAllText(设置文件));
+                if (档.RootElement.TryGetProperty("Unity目录", out var v)) return v.GetString();
+            }
+            catch { }
+            return null;
+        }
+
         private static string? 问目录(string? 预填 = null)
         {
             using var 框 = new FolderBrowserDialog
@@ -795,6 +809,22 @@ namespace ZhEditorShell
                                         // 找到了就把框预填到那儿 —— 他一眼看见自己的项目名，点确定就行。
                                         var 猜 = 找最近项目(out var 猜说明);
                                         记(猜说明);
+                                        // 日志里认不出来时退一步：把上次用过的项目所在的**上一层**摆出来。
+                                        // 用户在自己熟悉的那一层挑，比从「文档」翻整个盘快得多 ——
+                                        // 而且旁边就能看见他另一个项目的文件夹，一眼分得清。
+                                        if (猜 == null)
+                                        {
+                                            var 旧 = 读旧目录();
+                                            if (!string.IsNullOrEmpty(旧))
+                                            {
+                                                var 上一层 = Directory.GetParent(旧.TrimEnd('\\', '/'))?.FullName;
+                                                if (上一层 != null && Directory.Exists(上一层))
+                                                {
+                                                    猜 = 上一层;
+                                                    记("用上次那层当起点：" + 上一层);
+                                                }
+                                            }
+                                        }
                                         var 选 = 问目录(猜);
                                         var 规整 = 选 == null ? null : 规整成Assets(选);
                                         if (规整 == null)

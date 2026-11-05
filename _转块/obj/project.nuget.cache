@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "Msft8YoVocc=",
+  "success": true,
+  "projectFilePath": "D:\\dswork\\zh-csharp-lab\\_转块\\_转块.csproj",
+  "expectedPackageFiles": [
+    "D:\\dswork\\zh-csharp-lab\\.nuget\\microsoft.codeanalysis.analyzers\\5.9.0-1.26328.17\\microsoft.codeanalysis.analyzers.5.9.0-1.26328.17.nupkg.sha512",
+    "D:\\dswork\\zh-csharp-lab\\.nuget\\microsoft.codeanalysis.common\\5.9.0\\microsoft.codeanalysis.common.5.9.0.nupkg.sha512",
+    "D:\\dswork\\zh-csharp-lab\\.nuget\\microsoft.codeanalysis.csharp\\5.9.0\\microsoft.codeanalysis.csharp.5.9.0.nupkg.sha512"
+  ],
+  "logs": []
+}
