@@ -19,6 +19,16 @@
   <!-- 把打包好的单文件页面塞进 exe 里，发布出来就一个文件 -->
   <ItemGroup>
     <EmbeddedResource Include="..\中文编辑器.html" LogicalName="ZhEditorShell.index.html" />
+    <!-- Unity 插件也塞进来：连上任何项目，编辑器自己把它写进 Assets/Editor，
+         用户不用手动拷贝。插件保存场景时会自动导出 关系.json。 -->
+    <EmbeddedResource Include="内置\ZhBridge.cs" LogicalName="ZhEditorShell.ZhBridge.cs" />
+  </ItemGroup>
+
+  <!-- 内置插件是给 Unity 编译的（依赖 UnityEditor / UnityEngine），
+       不能跟着本工程一起编译 —— 这里只是把它当资源嵌进去。 -->
+  <ItemGroup>
+    <Compile Remove="内置\**\*.cs" />
+    <None Remove="内置\**\*.cs" />
   </ItemGroup>
 
   <!-- 和图数据层共用同一份组装代码，不抄第二份 -->

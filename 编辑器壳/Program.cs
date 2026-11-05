@@ -166,6 +166,69 @@ namespace ZhEditorShell
         // 正是这种情况最需要提醒用户「你写向的项目和开着的不是同一个」。
         private static string? Unity当前项目() => 找最近项目(out _, false);
 
+        // 把 Unity 插件写进项目里（Assets/Editor/ZhBridge.cs）。
+        //
+        // 以前要用户自己把 .cs 拷过去 —— 换项目就得再拷一次，忘了就是
+        // 「Unity 菜单里没有中文套式」。插件就在 exe 里，连上项目直接写出去。
+        //
+        // 已经有了就不动：用户可能改过它。
+        private static bool 确保插件(string 资源目录, Action<string> 记)
+        {
+            try
+            {
+                var 目标 = Path.Combine(资源目录, "Editor", "ZhBridge.cs");
+                if (File.Exists(目标)) return false;
+                using var 流 = typeof(Program).Assembly.GetManifestResourceStream("ZhEditorShell.ZhBridge.cs");
+                if (流 == null) { 记("exe 里没找到内置插件"); return false; }
+                using var 读 = new StreamReader(流, System.Text.Encoding.UTF8);
+                var 源码 = 读.ReadToEnd();
+                var 目录 = Path.GetDirectoryName(目标);
+                if (!string.IsNullOrEmpty(目录)) Directory.CreateDirectory(目录);
+                File.WriteAllText(目标, 源码, new System.Text.UTF8Encoding(false));
+                记("已把 Unity 插件写进 " + 目标);
+                return true;
+            }
+            catch (Exception e) { 记("装插件失败：" + e.Message); return false; }
+        }
+
+        // 有插件导出的 关系.json 就用它。
+        // 它读的是 Unity 内存里的场景，**不管有没有存盘都准**，
+        // 比解析 .scene 文件强 —— 那个只能看到硬盘上最后一次保存的样子。
+        private static List<object>? 从关系json装实例(string 项目根, string 资源目录, Action<string> 记)
+        {
+            try
+            {
+                var 路 = Path.Combine(项目根, ".zh-bridge", "关系.json");
+                if (!File.Exists(路)) return null;
+                using var 档 = JsonDocument.Parse(File.ReadAllText(路));
+                if (!档.RootElement.TryGetProperty("物体", out var 物体们)) return null;
+
+                var 出 = new List<object>();
+                foreach (var 物 in 物体们.EnumerateArray())
+                {
+                    var 组件们 = new List<object>();
+                    if (物.TryGetProperty("组件", out var 件们) && 件们.ValueKind == JsonValueKind.Array)
+                        foreach (var 件 in 件们.EnumerateArray())
+                        {
+                            var 脚本 = 件.TryGetProperty("脚本", out var s) ? s.GetString() : null;
+                            var 字段 = 件.TryGetProperty("字段", out var f) && f.ValueKind == JsonValueKind.Object
+                                ? f.GetRawText() : "{}";
+                            组件们.Add(new { 脚本, 字段 });
+                        }
+                    出.Add(new
+                    {
+                        文件 = 物.TryGetProperty("文件", out var w) ? w.GetString() ?? "" : "",
+                        物体 = 物.TryGetProperty("名", out var n) ? n.GetString() ?? "" : "",
+                        tag = 物.TryGetProperty("tag", out var t) ? t.GetString() ?? "" : "",
+                        组件 = 组件们,
+                    });
+                }
+                记("用插件的 关系.json：" + 出.Count + " 个物体");
+                return 出;
+            }
+            catch (Exception e) { 记("读 关系.json 失败：" + e.Message); return null; }
+        }
+
         private static string? 问目录(string? 预填 = null)
         {
             using var 框 = new FolderBrowserDialog
@@ -925,10 +988,17 @@ namespace ZhEditorShell
                                         回话(网页, new { 命令 = "出错", 说 = $"这个项目里既没有 .cs 也没有 .unity（{资源}）—— 是不是选错项目了？再点一次「扫描项目」换一个" });
                                         return;
                                     }
-                                    var 实例们 = 解析实例(项目根, 资源, 场景, 预制);
-                                    记($"解析出实例 {实例们.Count} 个，准备回话");
+                                    // 插件先装进去，再决定用哪份数据。
+                                    // 装了它，Unity 那边保存场景就会自动导出 关系.json。
+                                    var 新装 = 确保插件(资源, 记);
+                                    var 从插件 = 从关系json装实例(项目根, 资源, 记);
+                                    var 实例们 = 从插件 ?? 解析实例(项目根, 资源, 场景, 预制);
+                                    记(从插件 != null
+                                        ? $"用插件数据：{实例们.Count} 个物体"
+                                        : $"插件还没导出过，退回读文件：{实例们.Count} 个物体");
                                     回话(网页, new { 命令 = "项目扫描", 项目根, 资源目录 = 资源,
-                                        脚本, 场景, 预制, 实例们 });
+                                        脚本, 场景, 预制, 实例们,
+                                        插件刚装 = 新装, 用插件 = 从插件 != null });
                                     记("回话已发");
                                 }
                                 catch (Exception ex)
