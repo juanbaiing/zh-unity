@@ -130,6 +130,26 @@ namespace ZhEditorShell
             return null;
         }
 
+        // 选择框该从哪一格开始？
+        //
+        // 给的是**项目根**（My project 这一层）。FolderBrowserDialog 设了 SelectedPath 之后，
+        // 打开时会停在它的**父目录**、把它高亮 —— 所以他看到的是「D:\vs学习 里面，
+        // My project 被选中，旁边就是 My project (1)」，一眼分得清哪个是自己那个。
+        //
+        // ⚠️ 别给「父目录」：那样反而停在再上一级（D:\），两个项目都看不见。
+        private static string? 猜起点()
+        {
+            var 日志里 = 找最近项目(out _);
+            if (日志里 != null) return 日志里;   // 日志里那条就是项目根
+
+            var 旧 = 读旧目录();
+            if (string.IsNullOrEmpty(旧)) return null;
+            // 记的一般是 .../My project/Assets —— 上一级就是项目根
+            var 项目根 = Directory.GetParent(旧.TrimEnd('\\', '/'))?.FullName;
+            if (项目根 != null && Directory.Exists(项目根)) return 项目根;
+            return null;
+        }
+
         private static string? 问目录(string? 预填 = null)
         {
             using var 框 = new FolderBrowserDialog
@@ -506,7 +526,7 @@ namespace ZhEditorShell
                             // 点顶栏那个牌子 → 重新选
                             if (命令 == "换目录")
                             {
-                                var 选了 = 问目录();
+                                var 选了 = 问目录(猜起点());
                                 if (选了 != null) 存目录(选了);
                                 回话(网页, new { 命令 = "目录", 路径 = 读目录() });
                                 return;
@@ -805,26 +825,11 @@ namespace ZhEditorShell
                                         // 光回一句「还没选 Assets 目录」等于让他自己去找那个能点的小标签，
                                         // 所以直接弹选择框：点扫描 = 选项目，一步到位。
                                         //
-                                        // 弹之前先试着从 Unity 的 Editor.log 把项目找出来，
-                                        // 找到了就把框预填到那儿 —— 他一眼看见自己的项目名，点确定就行。
-                                        var 猜 = 找最近项目(out var 猜说明);
-                                        记(猜说明);
-                                        // 日志里认不出来时退一步：把上次用过的项目所在的**上一层**摆出来。
-                                        // 用户在自己熟悉的那一层挑，比从「文档」翻整个盘快得多 ——
-                                        // 而且旁边就能看见他另一个项目的文件夹，一眼分得清。
-                                        if (猜 == null)
-                                        {
-                                            var 旧 = 读旧目录();
-                                            if (!string.IsNullOrEmpty(旧))
-                                            {
-                                                var 上一层 = Directory.GetParent(旧.TrimEnd('\\', '/'))?.FullName;
-                                                if (上一层 != null && Directory.Exists(上一层))
-                                                {
-                                                    猜 = 上一层;
-                                                    记("用上次那层当起点：" + 上一层);
-                                                }
-                                            }
-                                        }
+                                        // 关键是**框要开在对的地方**：预填项目根，FolderBrowserDialog 就会
+                                        // 打开在它的父目录、把它高亮 —— 几个项目并排摆着，他直接点确认就行。
+                                        // 只有真正要换项目时才会去动它。
+                                        var 猜 = 猜起点();
+                                        记(猜 == null ? "没有可用的起点" : "起点：" + 猜);
                                         var 选 = 问目录(猜);
                                         var 规整 = 选 == null ? null : 规整成Assets(选);
                                         if (规整 == null)
@@ -880,7 +885,7 @@ namespace ZhEditorShell
                             var 文件名 = 根.GetProperty("文件名").GetString() ?? "未命名.cs";
                             var 内容 = 根.GetProperty("内容").GetString() ?? "";
 
-                            var 目录路 = 读目录() ?? 问目录();
+                            var 目录路 = 读目录() ?? 问目录(猜起点());
                             if (目录路 == null)
                             {
                                 回话(网页, new { 命令 = "出错", 说 = "没选目录，取消了" });
