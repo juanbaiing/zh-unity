@@ -7755,17 +7755,16 @@ function 开窗(实例el, 脚本名) {
   const 体 = 实例el.querySelector(':scope > .实例体');
   if (!体) { 网提示('这个实例框没有内容区'); return; }
 
-  // 框在 #world 里，尺寸是 CSS 单位，屏幕上还要乘 视.z。
-  // 所以要「屏幕上占舞台 92%」，CSS 就得是 舞台宽/视.z。
-  // 高度按屏幕比例走 —— 这样开出来的画布是屏幕的形状，不是方的。
-  const 台r = 舞台.getBoundingClientRect();
-  const 外z = 视.z || 1;
-  const 屏比 = (window.innerWidth || 1400) / (window.innerHeight || 900);
-  const 框CSS宽 = Math.round(台r.width * 0.92 / 外z);
-  实例el.style.width = 框CSS宽 + 'px';
-  实例el.style.height = Math.round(框CSS宽 / 屏比) + 'px';
+  // 不撑大。
+  // 以前这里会把实例框撑成舞台的 92% —— 一撑大，旁边的框被推走、连线全部重算，
+  // 整个网看着就乱了。框保持原尺寸，里面的画布自己滚轮放大。
+  //
+  // 但「保持原尺寸」不能只靠不改它：下面会清空 .实例体 换成画布，
+  // 框的高度是内容撑的，一清就塌（实测 147×85 → 147×30）。
+  // 所以先把当前尺寸量下来，换了内容再钉回去。关窗时这块尺寸会被清掉。
+  const 原宽 = 实例el.offsetWidth, 原高 = 实例el.offsetHeight;
 
-  关窗();
+  关窗();                                 // 先把上一扇窗收干净，再开新的
   窗.脚本 = 脚本名; 窗.实例 = 实例el.dataset.id;
   窗.体 = 体;
   窗.原内容 = [...体.childNodes];        // 关窗时放回去
@@ -7773,6 +7772,11 @@ function 开窗(实例el, 脚本名) {
 
   体.textContent = '';
   体.classList.add('编辑中');
+  // 把量下来的尺寸钉回去 —— 不然框跟着内容塌成一窄条
+  if (原宽 > 0 && 原高 > 0) {
+    实例el.style.width = 原宽 + 'px';
+    实例el.style.height = 原高 + 'px';
+  }
 
   // 画布：撑满 .实例体。它就在框内部，不是浮在上面的。
   const w = document.createElement('div');
