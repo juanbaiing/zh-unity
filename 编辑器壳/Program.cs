@@ -28,7 +28,11 @@ namespace ZhEditorShell
                 if (档.RootElement.TryGetProperty("Unity目录", out var v))
                 {
                     var 路 = v.GetString();
-                    if (!string.IsNullOrWhiteSpace(路) && Directory.Exists(路)) return 路;
+                    if (string.IsNullOrWhiteSpace(路) || !Directory.Exists(路)) return null;
+                    // 老版本可能把「项目根」存进来了（换目录那条路以前不规整）。
+                    // 读的时候统一折算成 Assets —— 否则扫描那边会按「上一层是项目根」
+                    // 反推，把装项目的父目录当成项目，旁边的项目全被扫进来。
+                    return 规整成Assets(路) ?? 路;
                 }
             }
             catch { /* 设置文件坏了就当没设过 */ }
@@ -107,12 +111,17 @@ namespace ZhEditorShell
 
         // 用户可能选的是项目根（My project），也可能是里面的 Assets —— 两种都认。
         // 新手记的是项目名，不是 Assets，所以别再逼他往里点一层。
+        //
+        // ⚠️ 不能拿「目录存在」当通过条件：D:\vs学习 这种「装着一堆项目的那一层」
+        //    也存在，放过去的话扫描会把它当项目根，往下反推出项目根是 D:\，
+        //    然后把旁边几个项目的场景全扫进来 —— 表现为「新项目里冒出一堆别人的物体」。
+        //    判据收紧到：要么下面有个 Assets，要么它自己就叫 Assets。
         private static string? 规整成Assets(string 选的)
         {
             var 根 = 选的.TrimEnd('\\', '/');
             var 内层 = Path.Combine(根, "Assets");
             if (Directory.Exists(内层)) return 内层;
-            if (Directory.Exists(根)) return 根;
+            if (string.Equals(Path.GetFileName(根), "Assets", StringComparison.OrdinalIgnoreCase)) return 根;
             return null;
         }
 
@@ -527,7 +536,19 @@ namespace ZhEditorShell
                             if (命令 == "换目录")
                             {
                                 var 选了 = 问目录(猜起点());
-                                if (选了 != null) 存目录(选了);
+                                if (选了 != null)
+                                {
+                                    // 必须规整成 Assets 再存。直接存「项目根」的话，
+                                    // 扫描那边会按「Assets 的上一级」反推，退成装项目的父目录，
+                                    // 把旁边几个项目一起扫进来。
+                                    var 规整 = 规整成Assets(选了);
+                                    if (规整 == null)
+                                    {
+                                        回话(网页, new { 命令 = "出错", 说 = "这个文件夹不对：要选 Unity 项目那一层（里面有 Assets 的），或者直接选 Assets" });
+                                        return;
+                                    }
+                                    存目录(规整);
+                                }
                                 回话(网页, new { 命令 = "目录", 路径 = 读目录() });
                                 return;
                             }

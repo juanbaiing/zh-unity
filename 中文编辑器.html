@@ -6625,9 +6625,16 @@ function 把扫描结果摆成网里的样子(实) {
   const 树 = 文件.split('/').pop().replace(/\.(scene|unity|prefab)$/i, '');
   const 物体名 = 实.物体 || 实.名 || '（没名字）';
   const 组件们 = Array.isArray(实.组件) ? 实.组件 : [];
+  // 脚本名应该是字符串；万一上游给了个对象，别让它变成 "[object Object]" 挂在框上
+  const 取名 = c => {
+    const v = c && c.脚本;
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object' && typeof v.名 === 'string') return v.名;
+    return '';
+  };
   const 脚本们 = 组件们
-    .filter(c => c && c.脚本)
-    .map(c => ({ 名: c.脚本, 出口: [] }));   // 出口补不出来，空着
+    .filter(c => 取名(c))
+    .map(c => ({ 名: 取名(c), 出口: [] }));   // 出口补不出来，空着
 
   return {
     id: '场景|' + 树 + '.' + 物体名,
@@ -6636,7 +6643,7 @@ function 把扫描结果摆成网里的样子(实) {
     层: 'L0',
     激活: true,
     x: 实.x || 0, y: 实.y || 0, w: 实.w || 0,
-    组件: 组件们.map(c => ({ 名: c.脚本 || '?', 字段: c.字段 || {} })),
+    组件: 组件们.map(c => ({ 名: 取名(c) || '?', 字段: c.字段 || {} })),
     脚本: 脚本们,
   };
 }
