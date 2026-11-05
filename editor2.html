@@ -75,6 +75,8 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
   .dirchip:hover{color:var(--cn);border-color:var(--cn)}
   .dirchip.设过{color:var(--dim)}
+  /* 编辑器写的项目和 Unity 现在开着的不是同一个 —— 提一句，但不拦 */
+  .dirchip.对不上{color:#c09a50}
   .dirchip.文件{max-width:360px}
   button{background:var(--钮);color:var(--text);border:1px solid var(--line);border-radius:8px;
     padding:4px 12px;font-size:var(--字正文);cursor:pointer;font-family:inherit}
@@ -2638,13 +2640,30 @@ document.getElementById('刷新钮').onclick = () => {
 };
 
 // Unity 目录显示在这 —— 不点「存到 Unity」也能看到现在存去哪儿，点一下能换
-function 刷新目录标签(路) {
+function 刷新目录标签(路, Unity开着) {
   const el = document.getElementById('unityDir');
   if (!el) return;
   el.dataset.路径 = 路 || '';
   el.classList.toggle('设过', !!路);
+  el.classList.remove('对不上');
   el.textContent = 路 ? 'Unity 目录：' + 路 : 'Unity 目录：未设（点这里选）';
   el.title = 路 ? 路 + '（点一下换一个）' : '点一下选 Unity 项目的 Assets 文件夹';
+
+  // 设置里记的（上次在编辑器里选的）和 Unity 现在真正打开的，经常不是同一个。
+  // 只提示、不自动切 —— 万一他就是想给别的项目写脚本，自动切会打断他。
+  if (!路 || !Unity开着) return;
+  const 归一 = s => String(s || '').replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase();
+  if (归一(路).startsWith(归一(Unity开着))) return;
+
+  const 短 = Unity开着.split(/[\\/]/).filter(Boolean).pop() || Unity开着;
+  // 显示项目名，不是它里面的 Assets —— 用户认的是「My project」，不是「Assets」
+  const 段们 = 路.split(/[\\/]/).filter(Boolean);
+  const 我的 = (段们.length >= 2 && 段们[段们.length - 1].toLowerCase() === 'assets')
+    ? 段们[段们.length - 2]
+    : (段们[段们.length - 1] || 路);
+  el.classList.add('对不上');
+  el.textContent = 'Unity 目录：' + 我的 + ' · Unity 开的是 ' + 短;
+  el.title = '编辑器现在写向：' + 路 + '\nUnity 现在打开的是：' + Unity开着 + '\n点一下可以换过去';
 }
 
 function 刷新本份标签() {
@@ -2746,7 +2765,7 @@ if (有壳()) {
       //    库只在启动时拉一次（那时候还没有更新的扫描结果）。
       画网({ 实例们: d.实例们 || [], 线: [], 孤岛们: [] }, 网.开);
     } else if (d.命令 === '目录') {
-      刷新目录标签(d.路径 || '');
+      刷新目录标签(d.路径 || '', d.Unity开着 || '');
     } else if (d.命令 === '关系图数据') {
       if (d.图) {
         // 已经有网 = 这是重拉（申诉完 / 刷新），视野原地不动

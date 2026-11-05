@@ -52,7 +52,7 @@ namespace ZhEditorShell
         // 新手不知道 Assets 在哪，也记不住项目放在哪个盘。
         // Unity/团结引擎启动时会把项目路径写进 Editor.log 的头几行 —— 直接读它。
         // 优先于让用户自己找：找到了就把选择框预填到那个目录，他一眼看到自己的项目名。
-        private static string? 找最近项目(out string 说明)
+        private static string? 找最近项目(out string 说明, bool 要求有脚本 = true)
         {
             说明 = "没找到 Editor.log";
             var 本地 = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -98,7 +98,7 @@ namespace ZhEditorShell
                                 }
                         }
                         catch { }
-                        if (!有脚本) continue;
+                        if (要求有脚本 && !有脚本) continue;
                         说明 = "从 " + Path.GetFileName(日志) + " 认出：" + 候选;
                         return 候选;
                     }
@@ -158,6 +158,13 @@ namespace ZhEditorShell
             if (项目根 != null && Directory.Exists(项目根)) return 项目根;
             return null;
         }
+
+        // Unity/团结引擎现在开着哪个项目？
+        // 用户心里想的是「我最后打开的那个」，而设置里记的是「上次在编辑器里选的那个」——
+        // 两者经常不是同一个。读日志拿到真的那个，好让顶栏提醒他。
+        // 这里**不能**要求「项目里有 .cs」：Unity 新开的空项目一个脚本都没有，
+        // 正是这种情况最需要提醒用户「你写向的项目和开着的不是同一个」。
+        private static string? Unity当前项目() => 找最近项目(out _, false);
 
         private static string? 问目录(string? 预填 = null)
         {
@@ -532,7 +539,7 @@ namespace ZhEditorShell
                             // 「现在存到哪」—— 页面一打开就问一次，显示在顶栏
                             if (命令 == "问目录")
                             {
-                                回话(网页, new { 命令 = "目录", 路径 = 读目录() });
+                                回话(网页, new { 命令 = "目录", 路径 = 读目录(), Unity开着 = Unity当前项目() });
                                 return;
                             }
 
